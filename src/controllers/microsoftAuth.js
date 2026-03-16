@@ -13,7 +13,15 @@ const {
 // Paso 1: Redirigir al usuario a Microsoft
 const microsoftLogin = (req, res) => {
     const returnUrl = req.query.returnUrl || '/';
-    const state = Buffer.from(JSON.stringify({ returnUrl })).toString('base64');
+    // ✅ NUEVO: recibir platform y redirectUri desde mobile
+    const platform = req.query.platform || 'web';
+    const mobileRedirectUri = req.query.redirectUri || '';
+
+    const state = Buffer.from(JSON.stringify({
+        returnUrl,
+        platform,           // 'web' o 'mobile'
+        mobileRedirectUri   // URI del deep link de la app
+    })).toString('base64');
 
     const authUrl = `https://login.microsoftonline.com/${MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize?` +
         `client_id=${MICROSOFT_CLIENT_ID}` +
@@ -31,15 +39,22 @@ const microsoftCallback = async (req, res) => {
     try {
         const { code, state } = req.query;
         let returnUrl = '/';
+        let platform = 'web';
+        let mobileRedirectUri = '';
 
         if (state) {
             try {
                 const decoded = JSON.parse(Buffer.from(state, 'base64').toString());
                 returnUrl = decoded.returnUrl || '/';
+                platform = decoded.platform || 'web';
+                mobileRedirectUri = decoded.mobileRedirectUri || '';
             } catch { }
         }
 
         if (!code) {
+            if (platform === 'mobile' && mobileRedirectUri) {
+                return res.redirect(`${mobileRedirectUri}?error=no_code`);
+            }
             return res.redirect(`/login?error=no_code`);
         }
 
@@ -76,7 +91,6 @@ const microsoftCallback = async (req, res) => {
         }).populate('areas');
 
         if (!user) {
-            // Crear nuevo usuario (o podrías rechazar si solo quieres usuarios pre-registrados)
             user = await User.create({
                 microsoftId: msProfile.id,
                 authProvider: 'microsoft',
@@ -86,17 +100,19 @@ const microsoftCallback = async (req, res) => {
                 active: true,
             });
         } else {
-            // Vincular Microsoft ID si el usuario ya existía con email/password
             if (!user.microsoftId) {
                 user.microsoftId = msProfile.id;
                 await user.save();
             }
             if (!user.active) {
+                if (platform === 'mobile' && mobileRedirectUri) {
+                    return res.redirect(`${mobileRedirectUri}?error=inactive`);
+                }
                 return res.redirect(`/login?error=inactive`);
             }
         }
 
-        // Generar tus propios JWT (misma lógica que el login normal)
+        // Generar JWT propios
         const accessToken = jwt.sign(
             { userId: user._id, email: user.email, cargo: user.cargo },
             JWT_SECRET,
@@ -109,7 +125,28 @@ const microsoftCallback = async (req, res) => {
             { expiresIn: JWT_REFRESH_EXPIRES_IN }
         );
 
-        // Redirigir al frontend con los tokens
+        // ✅ NUEVO: Redirigir según la plataforma
+        if (platform === 'mobile' && mobileRedirectUri) {
+            // Redirigir al deep link de la app móvil
+            const userJson = encodeURIComponent(JSON.stringify({
+                _id: user._id,
+                name: user.name,
+                lname: user.lname,
+                email: user.email,
+                position: user.position,
+                areas: user.areas,
+                photo: user.photo,
+                sede: user.sede,
+                phone: user.phone,
+                dni: user.dni,
+            }));
+
+            return res.redirect(
+                `${mobileRedirectUri}?token=${accessToken}&refresh=${refreshToken}&user=${userJson}`
+            );
+        }
+
+        // Web: comportamiento original
         const frontendUrl = process.env.FRONTEND_URL;
         res.redirect(
             `${frontendUrl}/auth/callback?token=${accessToken}&refresh=${refreshToken}&returnUrl=${encodeURIComponent(returnUrl)}`
@@ -117,6 +154,10 @@ const microsoftCallback = async (req, res) => {
 
     } catch (error) {
         console.error('Error en Microsoft callback:', error.response?.data || error);
+
+        if (platform === 'mobile' && mobileRedirectUri) {
+            return res.redirect(`${mobileRedirectUri}?error=microsoft_auth_failed`);
+        }
         res.redirect(`/login?error=microsoft_auth_failed`);
     }
 };
