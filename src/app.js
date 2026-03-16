@@ -13,7 +13,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/auth', require('./routes/Auth'));
 app.use('/api/gastos', require('./routes/Gasto'));
-app.use('/api/usuarios', require('./routes/User'));
+app.use('/api/usuario', require('./routes/User'));
 app.use('/api/giras', require('./routes/Gira'));
 app.use('/api/sedes', require('./routes/Sede'));
 app.use('/api/asistencias', require('./routes/Asistencia'));
@@ -42,6 +42,9 @@ app.use('/api/training/questions', require('./routes/questionRoutes'));
 app.use('/api/training/progress', require('./routes/progressRoutes'));
 app.use('/api/training/reports', require('./routes/reportRoutes'));
 app.use('/api/images', require('./routes/imageRoutes'));
+
+app.use('/api/bitrix/tasks', require('./routes/bitrixTaskRoutes'));
+app.use('/api/bitrix/users', require('./routes/bitrixUserRoutes'));
 
 const { registerQuotationRoutes } = require('./routes/quotationModule');
 registerQuotationRoutes(app);

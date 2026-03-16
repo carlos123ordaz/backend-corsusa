@@ -119,6 +119,12 @@ const changePassword = async (req, res) => {
         // Buscar usuario con password
         const user = await User.findById(userId).select('+password');
 
+        if (user.authProvider === 'microsoft') {
+            return res.status(400).json({
+                error: 'Los usuarios con Microsoft no pueden cambiar la contraseña aquí'
+            });
+        }
+
         if (!user) {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }

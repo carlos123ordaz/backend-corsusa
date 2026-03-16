@@ -13,7 +13,7 @@
     "@azure/storage-blob": "^12.28.0",
     "@google-cloud/storage": "^7.18.0",
     "@google/generative-ai": "^0.24.1",
-    "axios": "^1.12.2",
+    "axios": "^1.13.6",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
@@ -26,6 +26,8 @@
     "node-cron": "^4.2.1",
     "nodemon": "^3.0.1",
     "openai": "^5.23.1",
+    "passport": "^0.7.0",
+    "passport-azure-ad": "^4.3.5",
     "uuid": "^13.0.0"
   }
 }
