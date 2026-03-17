@@ -41,4 +41,30 @@ const getTaskById = async (req, res) => {
     }
 };
 
-module.exports = { getTasks, getTaskById };
+// En bitrixTaskController.js, agregar:
+
+const getLastTasksByEmail = async (req, res) => {
+    try {
+        const { email } = req.query;
+
+        if (!email) {
+            return res.status(400).json({ message: 'El parámetro "email" es requerido.' });
+        }
+
+        const result = await BitrixTaskService.getLastTasksByEmail(email, 5);
+
+        if (!result) {
+            return res.status(404).json({ message: 'No se encontró un usuario con ese correo.' });
+        }
+
+        return res.json(result);
+    } catch (error) {
+        console.error('Error al obtener últimas tareas por email:', error.message);
+        return res.status(500).json({
+            message: 'Error al obtener las tareas desde Bitrix24.',
+            error: error.message,
+        });
+    }
+};
+
+module.exports = { getTasks, getTaskById, getLastTasksByEmail };

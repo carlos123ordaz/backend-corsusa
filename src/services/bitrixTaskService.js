@@ -117,6 +117,66 @@ class BitrixTaskService {
             createdDate: task.createdDate,
         };
     }
+
+    // En BitrixTaskService, agregar:
+
+    /**
+     * Busca un usuario por email y retorna su ID.
+     */
+    static async getUserIdByEmail(email) {
+        const response = await axios.post(`${BITRIX_WEBHOOK_URL}/user.get`, {
+            filter: { EMAIL: email },
+        });
+
+        const users = response.data?.result || [];
+        return users.length > 0 ? users[0].ID : null;
+    }
+
+    /**
+     * Obtiene las últimas N tareas de un usuario buscado por email.
+     */
+    static async getLastTasksByEmail(email, limit = 5) {
+        const userId = await this.getUserIdByEmail(email);
+
+        if (!userId) {
+            return null; // Usuario no encontrado
+        }
+
+        const response = await axios.post(`${BITRIX_WEBHOOK_URL}/tasks.task.list`, {
+            order: { ID: 'desc' },
+            filter: {
+                '%TITLE': 'Viáticos',
+                CREATED_BY: userId,
+            },
+            select: ['ID', 'TITLE', 'DESCRIPTION', 'STAGE_ID', 'CREATED_BY', 'RESPONSIBLE_ID', 'CREATED_DATE', 'STATUS'],
+            start: 0,
+        });
+
+        const allTasks = response.data?.result?.tasks || [];
+        const tasks = allTasks.slice(0, limit);
+
+        const userIds = [...new Set([
+            ...tasks.map(t => t.createdBy),
+            ...tasks.map(t => t.responsibleId),
+        ].filter(Boolean))];
+
+        const usersMap = await this.getUsersByIds(userIds);
+
+        return {
+            tasks: tasks.map(task => ({
+                id: task.id,
+                title: task.title,
+                description: task.description || '',
+                stageId: task.stageId,
+                status: task.status,
+                createdBy: task.createdBy,
+                creator: usersMap[task.createdBy] || { id: task.createdBy, name: 'Desconocido' },
+                responsible: usersMap[task.responsibleId] || { id: task.responsibleId, name: 'Desconocido' },
+                createdDate: task.createdDate,
+            })),
+            total: tasks.length,
+        };
+    }
 }
 
 module.exports = BitrixTaskService;

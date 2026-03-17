@@ -12,9 +12,8 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/auth', require('./routes/Auth'));
-app.use('/api/gastos', require('./routes/Gasto'));
-app.use('/api/usuario', require('./routes/User'));
-app.use('/api/giras', require('./routes/Gira'));
+app.use('/api/expenses', require('./routes/Gasto'));
+app.use('/api/users', require('./routes/User'));
 app.use('/api/sedes', require('./routes/Sede'));
 app.use('/api/asistencias', require('./routes/Asistencia'));
 app.use('/api/incidencias', require('./routes/incidencia'));
