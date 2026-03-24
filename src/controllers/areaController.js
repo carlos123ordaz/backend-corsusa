@@ -5,10 +5,7 @@ const User = require('../models/User');
 exports.getAllAreas = async (req, res) => {
     try {
         const areas = await Area.find({ status: 'active' }).sort({ name: 1 });
-        res.json({
-            success: true,
-            data: areas,
-        });
+        res.json(areas);
     } catch (error) {
         res.status(500).json({
             success: false,
@@ -27,10 +24,7 @@ exports.getAreaById = async (req, res) => {
                 message: 'Área no encontrada',
             });
         }
-        res.json({
-            success: true,
-            data: area,
-        });
+        res.json(area);
     } catch (error) {
         res.status(500).json({
             success: false,

@@ -8,10 +8,7 @@ const costCenterController = {
             const costCenters = await CostCenter.find({ status: true })
                 .sort({ level: 1, code: 1 });
 
-            res.status(200).json({
-                success: true,
-                data: costCenters
-            });
+            res.status(200).json(costCenters);
         } catch (error) {
             res.status(500).json({
                 success: false,
@@ -30,10 +27,7 @@ const costCenterController = {
                 status: 'active'
             }).sort({ code: 1 });
 
-            res.status(200).json({
-                success: true,
-                data: costCenters
-            });
+            res.status(200).json(costCenters);
         } catch (error) {
             res.status(500).json({
                 success: false,
@@ -53,10 +47,7 @@ const costCenterController = {
                 status: 'active'
             }).sort({ code: 1 });
 
-            res.status(200).json({
-                success: true,
-                data: costCenters
-            });
+            res.status(200).json(costCenters);
         } catch (error) {
             res.status(500).json({
                 success: false,
@@ -80,10 +71,7 @@ const costCenterController = {
                 });
             }
 
-            res.status(200).json({
-                success: true,
-                data: costCenter
-            });
+            res.status(200).json(costCenter);
         } catch (error) {
             res.status(500).json({
                 success: false,
@@ -143,11 +131,7 @@ const costCenterController = {
 
             await newCostCenter.save();
 
-            res.status(201).json({
-                success: true,
-                message: 'Centro de costo creado exitosamente',
-                data: newCostCenter
-            });
+            res.status(201).json(newCostCenter);
         } catch (error) {
             if (error.code === 11000) {
                 return res.status(400).json({
@@ -186,11 +170,7 @@ const costCenterController = {
                 });
             }
 
-            res.status(200).json({
-                success: true,
-                message: 'Centro de costo actualizado exitosamente',
-                data: costCenter
-            });
+            res.status(200).json(costCenter);
         } catch (error) {
             res.status(500).json({
                 success: false,

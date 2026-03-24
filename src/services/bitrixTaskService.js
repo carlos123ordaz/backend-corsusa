@@ -137,7 +137,6 @@ class BitrixTaskService {
      */
     static async getLastTasksByEmail(email, limit = 5) {
         const userId = await this.getUserIdByEmail(email);
-
         if (!userId) {
             return null; // Usuario no encontrado
         }

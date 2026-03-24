@@ -1,5 +1,12 @@
 const { Schema, model } = require('mongoose');
 
+const CostCenterAllocationSchema = new Schema({
+    costCenter_1: { type: Schema.Types.ObjectId, ref: 'CostCenter', required: true },
+    costCenter_2: { type: Schema.Types.ObjectId, ref: 'CostCenter', default: null },
+    costCenter_3: { type: Schema.Types.ObjectId, ref: 'CostCenter', default: null },
+    percentage: { type: Number, required: true, min: 1, max: 100 }
+}, { _id: false });
+
 const GastoSchema = Schema({
     tipo: String,
     categoria: String,
@@ -17,9 +24,18 @@ const GastoSchema = Schema({
     detalle_sustento: String,
     descripcion: String,
     direccion: String,
-    costCenter_1: { type: Schema.Types.ObjectId, ref: 'CostCenter' },
-    costCenter_2: { type: Schema.Types.ObjectId, ref: 'CostCenter' },
-    costCenter_3: { type: Schema.Types.ObjectId, ref: 'CostCenter' },
+    costCenterAllocations: {
+        type: [CostCenterAllocationSchema],
+        validate: {
+            validator: function (allocations) {
+                if (!allocations || allocations.length === 0) return true;
+                const totalPercentage = allocations.reduce((sum, a) => sum + a.percentage, 0);
+                return totalPercentage === 100;
+            },
+            message: 'La suma de porcentajes debe ser exactamente 100%'
+        }
+    },
+
     items: [
         {
             descripcion: String,
@@ -47,9 +63,8 @@ const GastoSchema = Schema({
         type: String,
         default: null
     }
-
 }, {
     timestamps: true
-})
+});
 
-module.exports = model('Gasto', GastoSchema)
+module.exports = model('Gasto', GastoSchema);
