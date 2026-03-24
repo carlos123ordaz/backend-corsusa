@@ -122,8 +122,8 @@ exports.getAsistenciasByDate = async (req, res) => {
 
         // Parsear la fecha
         const [year, month, day] = fecha.split('-').map(Number);
-        const fechaInicio = new Date(year, month - 1, day, 0, 0, 0, 0);
-        const fechaFin = new Date(year, month - 1, day, 23, 59, 59, 999);
+        const fechaInicio = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+        const fechaFin = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
 
         const asistencias = await Asistencia.find({
             createdAt: {
@@ -135,6 +135,7 @@ exports.getAsistenciasByDate = async (req, res) => {
             .populate('sede', 'nombre')
             .sort({ createdAt: -1 });
 
+        console.log('1')
         res.json(asistencias);
     } catch (error) {
         console.error('Error en getAsistenciasByDate:', error);
@@ -162,10 +163,8 @@ exports.getAsistenciaByUser = async (req, res) => {
 
         // Buscar asistencia de hoy
         const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        const manana = new Date(hoy);
-        manana.setDate(manana.getDate() + 1);
-
+        const year = hoy.getUTCFullYear(), month = hoy.getUTCMonth(), day = hoy.getUTCDate();
+        const manana = new Date(Date.UTC(year, month, day + 1, 0, 0, 0, 0));
         const asistencia = await Asistencia.findOne({
             user: id,
             createdAt: {
@@ -175,7 +174,7 @@ exports.getAsistenciaByUser = async (req, res) => {
         })
             .populate('user', 'name lname email dni position')
             .populate('sede', 'nombre');
-
+        console.log('asistencia: ', asistencia)
         res.json({
             success: true,
             data: asistencia,
@@ -195,20 +194,16 @@ exports.getAsistenciaByUser = async (req, res) => {
 exports.getAsistenciasByDateRange = async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
-
         if (!startDate || !endDate) {
             return res.status(400).json({
                 success: false,
                 message: 'startDate y endDate son requeridos',
             });
         }
-
         const fechaInicio = new Date(startDate);
         fechaInicio.setHours(0, 0, 0, 0);
-
         const fechaFin = new Date(endDate);
         fechaFin.setHours(23, 59, 59, 999);
-
         const asistencias = await Asistencia.find({
             createdAt: {
                 $gte: fechaInicio,

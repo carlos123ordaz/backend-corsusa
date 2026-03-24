@@ -10,10 +10,8 @@ const {
     MICROSOFT_REDIRECT_URI
 } = require('../config/microsoft');
 
-// Paso 1: Redirigir al usuario a Microsoft
 const microsoftLogin = (req, res) => {
     const returnUrl = req.query.returnUrl || '/';
-    // ✅ NUEVO: recibir platform y redirectUri desde mobile
     const platform = req.query.platform || 'web';
     const mobileRedirectUri = req.query.redirectUri || '';
 

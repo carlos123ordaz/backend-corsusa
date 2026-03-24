@@ -6,7 +6,7 @@ const XLSX = require('xlsx');
 
 require('dotenv')
 
-const genAI = new GoogleGenerativeAI('AIzaSyAheayc0VWeMd8Fx1zc8kpnqo9hwMcAD8M');
+const genAI = new GoogleGenerativeAI(process.env.API_KEY_GEMINI);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
 // ─── Helper para popular allocations ───
