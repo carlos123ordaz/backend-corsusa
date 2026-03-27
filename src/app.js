@@ -34,6 +34,7 @@ app.use('/api/warehouses', require('./routes/warehouseRoutes'));
 app.use('/api/warehouse-movements', require('./routes/warehouseMovementRoutes'));
 
 app.use('/api/cost-centers', require('./routes/costCenterRoutes'));
+app.use('/api/roles', require('./routes/roleRoutes'));
 
 app.use('/api/training/courses', require('./routes/courseRoutes'));
 app.use('/api/training/topics', require('./routes/topicRoutes'));

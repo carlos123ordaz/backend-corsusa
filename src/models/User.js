@@ -13,6 +13,7 @@ const UserSchema = Schema({
     phone: String,
     email: String,
     password: String,
+    role: { type: Schema.Types.ObjectId, ref: 'Role', default: null },
     sede: { type: Schema.Types.ObjectId, ref: 'Sede' },
     pushToken: {
         type: String,
