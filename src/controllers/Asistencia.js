@@ -133,9 +133,9 @@ exports.getAsistenciasByDate = async (req, res) => {
         })
             .populate('user', 'name lname email dni position')
             .populate('sede', 'nombre')
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 })
+            .select('+scheduleCompliance +expectedSchedule +scheduleConfigSnapshot +similarity_entrada +similarity_salida');
 
-        console.log('1')
         res.json(asistencias);
     } catch (error) {
         console.error('Error en getAsistenciasByDate:', error);
@@ -173,8 +173,8 @@ exports.getAsistenciaByUser = async (req, res) => {
             },
         })
             .populate('user', 'name lname email dni position')
-            .populate('sede', 'nombre');
-        console.log('asistencia: ', asistencia)
+            .populate('sede', 'nombre')
+            .select('+scheduleCompliance +expectedSchedule +scheduleConfigSnapshot +similarity_entrada +similarity_salida');
         res.json({
             success: true,
             data: asistencia,
@@ -277,6 +277,61 @@ exports.getAsistenciasStats = async (req, res) => {
             success: false,
             message: error.message,
         });
+    }
+};
+
+/**
+ * Obtener todos los usuarios con su estado de asistencia para una fecha (vista admin)
+ */
+exports.getAsistenciasAdminByDate = async (req, res) => {
+    try {
+        const { fecha } = req.params;
+
+        if (!fecha) {
+            return res.status(400).json({ success: false, message: 'Fecha es requerida' });
+        }
+
+        const [year, month, day] = fecha.split('-').map(Number);
+        const fechaInicio = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+        const fechaFin = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+
+        const [users, asistencias] = await Promise.all([
+            User.find({ active: true })
+                .populate('areas', 'name')
+                .populate('role', 'name isAdmin')
+                .populate('sede', 'nombre')
+                .lean(),
+            Asistencia.find({ createdAt: { $gte: fechaInicio, $lte: fechaFin } })
+                .populate('sede', 'nombre')
+                .lean(),
+        ]);
+
+        const asistenciaMap = {};
+        asistencias.forEach(a => {
+            if (a.user) asistenciaMap[a.user.toString()] = a;
+        });
+
+        const result = users.map(user => ({
+            user: {
+                _id: user._id,
+                name: user.name,
+                lname: user.lname,
+                email: user.email,
+                dni: user.dni,
+                position: user.position,
+                photo: user.photo,
+                areas: user.areas,
+                role: user.role,
+                sede: user.sede,
+                hasEmbedding: Array.isArray(user.embedding) && user.embedding.length > 0,
+            },
+            asistencia: asistenciaMap[user._id.toString()] || null,
+        }));
+
+        res.json({ success: true, data: result, total: result.length });
+    } catch (error) {
+        console.error('Error en getAsistenciasAdminByDate:', error);
+        res.status(500).json({ success: false, message: error.message });
     }
 };
 

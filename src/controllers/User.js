@@ -51,7 +51,12 @@ const getUsers = async (req, res) => {
             .sort({ _id: -1 })
             .lean();
 
-        return res.status(200).json(users);
+        const usersWithEmbedding = users.map(u => ({
+            ...u,
+            hasEmbedding: Array.isArray(u.embedding) && u.embedding.length > 0,
+        }));
+
+        return res.status(200).json(usersWithEmbedding);
     } catch (error) {
         console.error(error);
         return res.status(500).json({ error: 'Internal Server Error' });

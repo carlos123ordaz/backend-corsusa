@@ -30,6 +30,10 @@ const AsistenciaSchema = Schema({
     valido_salida: Boolean,
     sede: { type: Schema.Types.ObjectId, ref: 'Sede' },
 
+    // Puntaje de similitud facial (para auditoría)
+    similarity_entrada: { type: Number, default: null },
+    similarity_salida: { type: Number, default: null },
+
     // ✅ NUEVO: Snapshot del horario esperado en el momento de la asistencia
     expectedSchedule: expectedScheduleSchema,
 
