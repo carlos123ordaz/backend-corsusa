@@ -161,10 +161,11 @@ exports.getAsistenciaByUser = async (req, res) => {
             });
         }
 
-        // Buscar asistencia de hoy
+        // Buscar asistencia del día actual completo
         const hoy = new Date();
-        const year = hoy.getUTCFullYear(), month = hoy.getUTCMonth(), day = hoy.getUTCDate();
-        const manana = new Date(Date.UTC(year, month, day + 1, 0, 0, 0, 0));
+        hoy.setHours(0, 0, 0, 0);
+        const manana = new Date(hoy);
+        manana.setDate(manana.getDate() + 1);
         const asistencia = await Asistencia.findOne({
             user: id,
             createdAt: {
