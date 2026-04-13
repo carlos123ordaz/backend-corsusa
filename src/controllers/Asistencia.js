@@ -1,15 +1,24 @@
 const Asistencia = require('../models/Asistencia');
+const ScheduleConfig = require('../models/ScheduleConfig');
 const User = require('../models/User');
 const Sede = require('../models/Sede');
 
 exports.insertAsistencia = async (req, res) => {
     try {
         const { userId, tipo, latitude, longitude } = req.body;
+        const markedByUserId = req.user?.userId || req.user?.sub || null;
 
         if (!userId || !tipo || latitude === undefined || longitude === undefined) {
             return res.status(400).json({
                 success: false,
                 message: 'userId, tipo, latitude y longitude son requeridos',
+            });
+        }
+
+        if (!markedByUserId) {
+            return res.status(401).json({
+                success: false,
+                message: 'No se pudo identificar al usuario que realiza la marcación',
             });
         }
 
@@ -21,7 +30,18 @@ exports.insertAsistencia = async (req, res) => {
             });
         }
 
-        const sede = user.sede ? await Sede.findById(user.sede) : null;
+        const markedByUser = await User.findById(markedByUserId);
+        if (!markedByUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'Usuario autenticado no encontrado',
+            });
+        }
+
+        const [sede, scheduleConfig] = await Promise.all([
+            user.sede ? Sede.findById(user.sede) : null,
+            ScheduleConfig.findOne({ userId, active: true }).lean(),
+        ]);
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
         const manana = new Date(hoy);
@@ -35,6 +55,8 @@ exports.insertAsistencia = async (req, res) => {
         });
 
         const ahora = new Date();
+        const daySchedule = getExpectedDaySchedule(scheduleConfig, ahora);
+        const flexibleMinutes = scheduleConfig?.isFlexible === false ? 0 : (scheduleConfig?.flexibleMinutes || 0);
         let esUbicacionValida = true;
         if (sede && sede.latitude && sede.longitude && sede.radio) {
             const distancia = calcularDistancia(
@@ -48,32 +70,52 @@ exports.insertAsistencia = async (req, res) => {
 
         if (!asistencia) {
             if (tipo === 'entrada') {
+                const scheduleCompliance = buildEntryCompliance(ahora, daySchedule, flexibleMinutes);
                 asistencia = new Asistencia({
                     user: userId,
                     entrada: ahora,
+                    marcado_por_entrada: markedByUser._id,
                     latitude_entrada: latitude,
                     longitude_entrada: longitude,
                     valido_entrada: esUbicacionValida,
                     sede: user.sede,
+                    expectedSchedule: daySchedule,
+                    scheduleCompliance,
+                    scheduleConfigSnapshot: buildScheduleConfigSnapshot(scheduleConfig),
                 });
             } else {
+                const scheduleCompliance = buildExitCompliance(ahora, daySchedule, flexibleMinutes, {});
                 asistencia = new Asistencia({
                     user: userId,
                     salida: ahora,
+                    marcado_por_salida: markedByUser._id,
                     latitude_salida: latitude,
                     longitude_salida: longitude,
                     valido_salida: esUbicacionValida,
                     sede: user.sede,
+                    expectedSchedule: daySchedule,
+                    scheduleCompliance,
+                    scheduleConfigSnapshot: buildScheduleConfigSnapshot(scheduleConfig),
                 });
             }
         } else {
             if (tipo === 'entrada') {
+                const scheduleCompliance = buildEntryCompliance(ahora, daySchedule, flexibleMinutes);
                 asistencia.entrada = ahora;
+                asistencia.marcado_por_entrada = markedByUser._id;
                 asistencia.latitude_entrada = latitude;
                 asistencia.longitude_entrada = longitude;
                 asistencia.valido_entrada = esUbicacionValida;
+                asistencia.expectedSchedule = daySchedule;
+                asistencia.scheduleCompliance = {
+                    ...asistencia.scheduleCompliance,
+                    ...scheduleCompliance,
+                };
+                asistencia.scheduleConfigSnapshot = buildScheduleConfigSnapshot(scheduleConfig);
             } else if (tipo === 'salida') {
+                const scheduleForExit = asistencia.expectedSchedule || daySchedule;
                 asistencia.salida = ahora;
+                asistencia.marcado_por_salida = markedByUser._id;
                 asistencia.latitude_salida = latitude;
                 asistencia.longitude_salida = longitude;
                 asistencia.valido_salida = esUbicacionValida;
@@ -84,13 +126,23 @@ exports.insertAsistencia = async (req, res) => {
                     const diffHoras = diffMs / (1000 * 60 * 60);
                     asistencia.horas_trabajadas = Math.max(0, diffHoras);
                 }
+                asistencia.expectedSchedule = scheduleForExit;
+                asistencia.scheduleCompliance = buildExitCompliance(
+                    ahora,
+                    scheduleForExit,
+                    flexibleMinutes,
+                    asistencia.scheduleCompliance || {}
+                );
+                asistencia.scheduleConfigSnapshot = buildScheduleConfigSnapshot(scheduleConfig);
             }
         }
 
         await asistencia.save();
 
-        // Poblar usuario antes de devolver
+        // Poblar relaciones antes de devolver
         await asistencia.populate('user', 'name lname email');
+        await asistencia.populate('marcado_por_entrada', 'name lname email');
+        await asistencia.populate('marcado_por_salida', 'name lname email');
 
         res.json({
             success: true,
@@ -132,6 +184,8 @@ exports.getAsistenciasByDate = async (req, res) => {
             },
         })
             .populate('user', 'name lname email dni position')
+            .populate('marcado_por_entrada', 'name lname email')
+            .populate('marcado_por_salida', 'name lname email')
             .populate('sede', 'nombre')
             .sort({ createdAt: -1 })
             .select('+scheduleCompliance +expectedSchedule +scheduleConfigSnapshot +similarity_entrada +similarity_salida');
@@ -174,6 +228,8 @@ exports.getAsistenciaByUser = async (req, res) => {
             },
         })
             .populate('user', 'name lname email dni position')
+            .populate('marcado_por_entrada', 'name lname email')
+            .populate('marcado_por_salida', 'name lname email')
             .populate('sede', 'nombre')
             .select('+scheduleCompliance +expectedSchedule +scheduleConfigSnapshot +similarity_entrada +similarity_salida');
         res.json({
@@ -212,6 +268,8 @@ exports.getAsistenciasByDateRange = async (req, res) => {
             },
         })
             .populate('user', 'name lname email dni position')
+            .populate('marcado_por_entrada', 'name lname email')
+            .populate('marcado_por_salida', 'name lname email')
             .populate('sede', 'nombre')
             .sort({ createdAt: 1 });
 
@@ -303,6 +361,8 @@ exports.getAsistenciasAdminByDate = async (req, res) => {
                 .populate('sede', 'nombre')
                 .lean(),
             Asistencia.find({ createdAt: { $gte: fechaInicio, $lte: fechaFin } })
+                .populate('marcado_por_entrada', 'name lname email')
+                .populate('marcado_por_salida', 'name lname email')
                 .populate('sede', 'nombre')
                 .lean(),
         ]);
@@ -353,4 +413,109 @@ function calcularDistancia(lat1, lon1, lat2, lon2) {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
     return R * c; // Distancia en metros
+}
+
+function buildScheduleConfigSnapshot(scheduleConfig) {
+    if (!scheduleConfig) return undefined;
+
+    return {
+        scheduleConfigId: scheduleConfig._id,
+        configName: scheduleConfig.name,
+        configColor: scheduleConfig.color,
+    };
+}
+
+function getExpectedDaySchedule(scheduleConfig, date) {
+    if (!scheduleConfig?.weekSchedule?.length) return undefined;
+
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        timeZone: 'America/Lima',
+    });
+
+    const weekdayMap = {
+        monday: 'monday',
+        tuesday: 'tuesday',
+        wednesday: 'wednesday',
+        thursday: 'thursday',
+        friday: 'friday',
+        saturday: 'saturday',
+        sunday: 'sunday',
+    };
+
+    const weekday = formatter.format(date).toLowerCase();
+    const dayKey = weekdayMap[weekday];
+
+    return scheduleConfig.weekSchedule.find((item) => item.day === dayKey) || undefined;
+}
+
+function getMinutesInLima(date) {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'America/Lima',
+    });
+
+    const parts = formatter.formatToParts(date);
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value || 0);
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value || 0);
+
+    return hour * 60 + minute;
+}
+
+function parseTimeToMinutes(time) {
+    const [hours, minutes] = String(time || '00:00').split(':').map(Number);
+    return (hours * 60) + minutes;
+}
+
+function buildEntryCompliance(date, daySchedule, flexibleMinutes) {
+    const base = {
+        isLateEntry: false,
+        minutesLateEntry: 0,
+        isEarlyDeparture: false,
+        minutesEarlyDeparture: 0,
+        flexibleMinutesApplied: flexibleMinutes,
+        wasFlexible: flexibleMinutes > 0,
+    };
+
+    if (!daySchedule?.isWorkday || !daySchedule.periods?.length) {
+        return base;
+    }
+
+    const entryMinutes = getMinutesInLima(date);
+    const firstPeriodStart = parseTimeToMinutes(daySchedule.periods[0].start);
+    const lateMinutes = Math.max(0, entryMinutes - firstPeriodStart - flexibleMinutes);
+
+    return {
+        ...base,
+        isLateEntry: lateMinutes > 0,
+        minutesLateEntry: lateMinutes,
+    };
+}
+
+function buildExitCompliance(date, daySchedule, flexibleMinutes, existingCompliance) {
+    const base = {
+        isLateEntry: existingCompliance?.isLateEntry || false,
+        minutesLateEntry: existingCompliance?.minutesLateEntry || 0,
+        isEarlyDeparture: false,
+        minutesEarlyDeparture: 0,
+        flexibleMinutesApplied: flexibleMinutes,
+        wasFlexible: flexibleMinutes > 0,
+    };
+
+    if (!daySchedule?.isWorkday || !daySchedule.periods?.length) {
+        return base;
+    }
+
+    const exitMinutes = getMinutesInLima(date);
+    const lastPeriod = daySchedule.periods[daySchedule.periods.length - 1];
+    const lastPeriodEnd = parseTimeToMinutes(lastPeriod.end);
+    const earlyMinutes = Math.max(0, lastPeriodEnd - flexibleMinutes - exitMinutes);
+
+    return {
+        ...base,
+        isEarlyDeparture: earlyMinutes > 0,
+        minutesEarlyDeparture: earlyMinutes,
+    };
 }

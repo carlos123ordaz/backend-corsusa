@@ -21,6 +21,8 @@ const AsistenciaSchema = Schema({
     user: { type: Schema.Types.ObjectId, ref: 'User' },
     entrada: Date,
     salida: Date,
+    marcado_por_entrada: { type: Schema.Types.ObjectId, ref: 'User', default: null },
+    marcado_por_salida: { type: Schema.Types.ObjectId, ref: 'User', default: null },
     latitude_entrada: Number,
     longitude_entrada: Number,
     latitude_salida: Number,

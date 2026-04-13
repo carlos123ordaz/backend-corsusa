@@ -5,7 +5,7 @@ const bcrypt = require('bcrypt');
 const getUserById = async (req, res) => {
     try {
         const { id } = req.params;
-        const user = await User.findById(id).populate('areas').populate('role').lean();
+        const user = await User.findById(id).populate('areas').populate('role').populate('sede').lean();
         if (!user) {
             return res.status(400).json({ error: 'Usuario no encontrado' });
         }
@@ -48,6 +48,7 @@ const getUsers = async (req, res) => {
         const users = await User.find(filter)
             .populate('areas')
             .populate('role')
+            .populate('sede')
             .sort({ _id: -1 })
             .lean();
 
@@ -78,6 +79,7 @@ const addUser = async (req, res) => {
         // Poblar las áreas antes de devolver
         await user.populate('areas');
         await user.populate('role');
+        await user.populate('sede');
 
         return res.status(200).json(user);
     } catch (error) {
@@ -102,7 +104,8 @@ const editUser = async (req, res) => {
 
         const userFound = await User.findByIdAndUpdate(id, req.body, { new: true })
             .populate('areas')
-            .populate('role');
+            .populate('role')
+            .populate('sede');
 
         if (!userFound) {
             return res.status(400).json({ error: 'Usuario no encontrado' });

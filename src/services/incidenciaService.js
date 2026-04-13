@@ -144,6 +144,8 @@ const POPULATE_BASIC = [
     { path: 'historialDeadline.user', select: 'name lname email' },
 ];
 
+const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // ─── Operaciones principales ─────────────────────────────────────────
 
 const crearIncidencia = async (data, files) => {
@@ -165,6 +167,8 @@ const crearIncidencia = async (data, files) => {
 };
 
 const obtenerIncidencias = async ({ page = 1, limit = 20, estado, gradoSeveridad, fechaInicio, fechaFin, search }) => {
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNumber = Math.max(parseInt(limit, 10) || 20, 1);
     const query = {};
 
     if (estado) query.estado = estado;
@@ -181,27 +185,45 @@ const obtenerIncidencias = async ({ page = 1, limit = 20, estado, gradoSeveridad
     }
 
     if (search) {
+        const normalizedSearch = search.trim();
+        const safeSearch = escapeRegex(normalizedSearch);
+        const matchingUsers = await Usuario.find({
+            $or: [
+                { name: { $regex: safeSearch, $options: 'i' } },
+                { lname: { $regex: safeSearch, $options: 'i' } },
+                { email: { $regex: safeSearch, $options: 'i' } },
+            ],
+        }).select('_id');
+        const matchingUserIds = matchingUsers.map((user) => user._id);
+
         query.$or = [
-            { tipoIncidente: { $regex: search, $options: 'i' } },
-            { ubicacion: { $regex: search, $options: 'i' } },
-            { descripcion: { $regex: search, $options: 'i' } },
-            { areaAfectada: { $regex: search, $options: 'i' } },
+            { tipoIncidente: { $regex: safeSearch, $options: 'i' } },
+            { ubicacion: { $regex: safeSearch, $options: 'i' } },
+            { descripcion: { $regex: safeSearch, $options: 'i' } },
+            { areaAfectada: { $regex: safeSearch, $options: 'i' } },
         ];
+
+        if (matchingUserIds.length > 0) {
+            query.$or.push(
+                { user: { $in: matchingUserIds } },
+                { asigned: { $in: matchingUserIds } }
+            );
+        }
     }
 
     const [incidencias, total] = await Promise.all([
         Incidencia.find(query)
             .sort({ createdAt: -1 })
-            .limit(limit)
-            .skip((page - 1) * limit)
+            .limit(limitNumber)
+            .skip((pageNumber - 1) * limitNumber)
             .populate(POPULATE_BASIC),
         Incidencia.countDocuments(query),
     ]);
 
     return {
         incidencias,
-        totalPages: Math.ceil(total / limit),
-        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limitNumber),
+        currentPage: pageNumber,
         total,
     };
 };
