@@ -7,11 +7,13 @@ exports.insertAsistencia = async (req, res) => {
     try {
         const { userId, tipo, latitude, longitude } = req.body;
         const markedByUserId = req.user?.userId || req.user?.sub || null;
+        const parsedLatitude = latitude !== undefined && latitude !== null ? Number(latitude) : undefined;
+        const parsedLongitude = longitude !== undefined && longitude !== null ? Number(longitude) : undefined;
 
-        if (!userId || !tipo || latitude === undefined || longitude === undefined) {
+        if (!userId || !tipo) {
             return res.status(400).json({
                 success: false,
-                message: 'userId, tipo, latitude y longitude son requeridos',
+                message: 'userId y tipo son requeridos',
             });
         }
 
@@ -57,11 +59,19 @@ exports.insertAsistencia = async (req, res) => {
         const ahora = new Date();
         const daySchedule = getExpectedDaySchedule(scheduleConfig, ahora);
         const flexibleMinutes = scheduleConfig?.isFlexible === false ? 0 : (scheduleConfig?.flexibleMinutes || 0);
+        const isRemoteWorkday = isRemoteDay(scheduleConfig, ahora);
         let esUbicacionValida = true;
-        if (sede && sede.latitude && sede.longitude && sede.radio) {
+        if (!isRemoteWorkday && (parsedLatitude === undefined || parsedLongitude === undefined || Number.isNaN(parsedLatitude) || Number.isNaN(parsedLongitude))) {
+            return res.status(400).json({
+                success: false,
+                message: 'latitude y longitude son requeridos para dias presenciales',
+            });
+        }
+
+        if (!isRemoteWorkday && sede && sede.latitude && sede.longitude && sede.radio) {
             const distancia = calcularDistancia(
-                latitude,
-                longitude,
+                parsedLatitude,
+                parsedLongitude,
                 parseFloat(sede.latitude),
                 parseFloat(sede.longitude)
             );
@@ -75,8 +85,8 @@ exports.insertAsistencia = async (req, res) => {
                     user: userId,
                     entrada: ahora,
                     marcado_por_entrada: markedByUser._id,
-                    latitude_entrada: latitude,
-                    longitude_entrada: longitude,
+                    latitude_entrada: parsedLatitude,
+                    longitude_entrada: parsedLongitude,
                     valido_entrada: esUbicacionValida,
                     sede: user.sede,
                     expectedSchedule: daySchedule,
@@ -89,8 +99,8 @@ exports.insertAsistencia = async (req, res) => {
                     user: userId,
                     salida: ahora,
                     marcado_por_salida: markedByUser._id,
-                    latitude_salida: latitude,
-                    longitude_salida: longitude,
+                    latitude_salida: parsedLatitude,
+                    longitude_salida: parsedLongitude,
                     valido_salida: esUbicacionValida,
                     sede: user.sede,
                     expectedSchedule: daySchedule,
@@ -103,8 +113,8 @@ exports.insertAsistencia = async (req, res) => {
                 const scheduleCompliance = buildEntryCompliance(ahora, daySchedule, flexibleMinutes);
                 asistencia.entrada = ahora;
                 asistencia.marcado_por_entrada = markedByUser._id;
-                asistencia.latitude_entrada = latitude;
-                asistencia.longitude_entrada = longitude;
+                asistencia.latitude_entrada = parsedLatitude;
+                asistencia.longitude_entrada = parsedLongitude;
                 asistencia.valido_entrada = esUbicacionValida;
                 asistencia.expectedSchedule = daySchedule;
                 asistencia.scheduleCompliance = {
@@ -116,8 +126,8 @@ exports.insertAsistencia = async (req, res) => {
                 const scheduleForExit = asistencia.expectedSchedule || daySchedule;
                 asistencia.salida = ahora;
                 asistencia.marcado_por_salida = markedByUser._id;
-                asistencia.latitude_salida = latitude;
-                asistencia.longitude_salida = longitude;
+                asistencia.latitude_salida = parsedLatitude;
+                asistencia.longitude_salida = parsedLongitude;
                 asistencia.valido_salida = esUbicacionValida;
                 if (asistencia.entrada) {
                     const entrada = new Date(asistencia.entrada);
@@ -422,6 +432,7 @@ function buildScheduleConfigSnapshot(scheduleConfig) {
         scheduleConfigId: scheduleConfig._id,
         configName: scheduleConfig.name,
         configColor: scheduleConfig.color,
+        remoteDays: scheduleConfig.remoteDays || [],
     };
 }
 
@@ -447,6 +458,17 @@ function getExpectedDaySchedule(scheduleConfig, date) {
     const dayKey = weekdayMap[weekday];
 
     return scheduleConfig.weekSchedule.find((item) => item.day === dayKey) || undefined;
+}
+
+function isRemoteDay(scheduleConfig, date) {
+    if (!scheduleConfig?.remoteDays?.length) return false;
+
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        weekday: 'long',
+        timeZone: 'America/Lima',
+    });
+
+    return scheduleConfig.remoteDays.includes(formatter.format(date).toLowerCase());
 }
 
 function getMinutesInLima(date) {

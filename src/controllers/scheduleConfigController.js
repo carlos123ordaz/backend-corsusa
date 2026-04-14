@@ -90,6 +90,7 @@ exports.createScheduleConfig = async (req, res) => {
             color,
             flexibleMinutes,
             isFlexible,
+            remoteDays,
             weekSchedule,
             totalWeeklyHours,
         } = req.body;
@@ -123,6 +124,7 @@ exports.createScheduleConfig = async (req, res) => {
             scheduleConfig.color = color || '#FFC0CB';
             scheduleConfig.flexibleMinutes = flexibleMinutes || 30;
             scheduleConfig.isFlexible = isFlexible ?? true;
+            scheduleConfig.remoteDays = Array.isArray(remoteDays) ? remoteDays : [];
             scheduleConfig.weekSchedule = weekSchedule;
             scheduleConfig.totalWeeklyHours = totalWeeklyHours;
 
@@ -145,6 +147,7 @@ exports.createScheduleConfig = async (req, res) => {
                 color: color || '#FFC0CB',
                 flexibleMinutes: flexibleMinutes || 30,
                 isFlexible: isFlexible ?? true,
+                remoteDays: Array.isArray(remoteDays) ? remoteDays : [],
                 weekSchedule,
                 totalWeeklyHours,
                 active: true,

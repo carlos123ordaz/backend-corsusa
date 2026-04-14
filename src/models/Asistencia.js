@@ -54,6 +54,7 @@ const AsistenciaSchema = Schema({
         scheduleConfigId: { type: Schema.Types.ObjectId, ref: 'ScheduleConfig' },
         configName: String,
         configColor: String,
+        remoteDays: { type: [String], default: [] },
     },
 }, {
     timestamps: true

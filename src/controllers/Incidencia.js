@@ -173,9 +173,10 @@ const getIncidenciasAsignadasStats = async (req, res) => {
 
 const getDashboardStats = async (req, res) => {
     try {
-        const { fechaInicio, fechaFin, estado, severidad } = req.query;
+        const { fechaInicio, fechaFin, estado, severidad, tipo } = req.query;
 
         const baseFilter = {};
+        const trendFilter = {};
 
         if (fechaInicio || fechaFin) {
             baseFilter.fecha = {};
@@ -188,9 +189,15 @@ const getDashboardStats = async (req, res) => {
         }
         if (estado) baseFilter.estado = { $in: estado.split(',') };
         if (severidad) baseFilter.gradoSeveridad = { $in: severidad.split(',') };
+        if (tipo) baseFilter.tipoIncidente = { $in: tipo.split(',') };
 
         const sixMonthsAgo = new Date();
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        trendFilter.fecha = { $gte: sixMonthsAgo };
+        if (estado) trendFilter.estado = { $in: estado.split(',') };
+        if (severidad) trendFilter.gradoSeveridad = { $in: severidad.split(',') };
+        if (tipo) trendFilter.tipoIncidente = { $in: tipo.split(',') };
+
         const now = new Date();
 
         const [
@@ -214,7 +221,7 @@ const getDashboardStats = async (req, res) => {
                 { $limit: 6 },
             ]),
             Incidencia.aggregate([
-                { $match: { fecha: { $gte: sixMonthsAgo }, ...baseFilter } },
+                { $match: trendFilter },
                 { $group: { _id: { year: { $year: '$fecha' }, month: { $month: '$fecha' } }, count: { $sum: 1 } } },
                 { $sort: { '_id.year': 1, '_id.month': 1 } },
             ]),

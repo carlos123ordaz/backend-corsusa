@@ -55,6 +55,11 @@ const scheduleConfigSchema = new mongoose.Schema(
             type: Boolean,
             default: true,
         },
+        remoteDays: {
+            type: [String],
+            enum: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
+            default: [],
+        },
         weekSchedule: [dayScheduleSchema],
         totalWeeklyHours: {
             type: Number,
