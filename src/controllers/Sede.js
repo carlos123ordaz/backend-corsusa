@@ -45,13 +45,16 @@ const deleteSede = async (req, res) => {
 }
 const registerFromDevice = async (req, res) => {
     try {
-        const { userId, latitude, longitude } = req.body;
+        const { userId, latitude, longitude, nombre: nombreParam } = req.body;
         if (!userId || latitude == null || longitude == null) {
             return res.status(400).json({ error: 'userId, latitude y longitude son requeridos' });
         }
 
-        const count = await Sede.countDocuments();
-        const nombre = `Sede #${count + 1}`;
+        let nombre = nombreParam?.trim();
+        if (!nombre) {
+            const count = await Sede.countDocuments();
+            nombre = `Sede #${count + 1}`;
+        }
 
         const sede = new Sede({ nombre, latitude, longitude, radio: 100 });
         await sede.save();
