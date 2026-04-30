@@ -1,7 +1,8 @@
 const express = require('express');
-const { insertSede, getAllSedes, updateSede, deleteSede } = require('../controllers/Sede');
+const { insertSede, getAllSedes, updateSede, deleteSede, registerFromDevice } = require('../controllers/Sede');
 const router = express.Router();
 
+router.post('/from-device', registerFromDevice);
 router.post('/', insertSede);
 router.get('/', getAllSedes);
 router.put('/:id', updateSede);

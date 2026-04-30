@@ -1,4 +1,5 @@
 const Sede = require("../models/Sede");
+const User = require("../models/User");
 
 const insertSede = async (req, res) => {
     try {
@@ -42,10 +43,33 @@ const deleteSede = async (req, res) => {
         return res.status(500).json({ error: 'Internal Server Error' });
     }
 }
+const registerFromDevice = async (req, res) => {
+    try {
+        const { userId, latitude, longitude } = req.body;
+        if (!userId || latitude == null || longitude == null) {
+            return res.status(400).json({ error: 'userId, latitude y longitude son requeridos' });
+        }
+
+        const count = await Sede.countDocuments();
+        const nombre = `Sede #${count + 1}`;
+
+        const sede = new Sede({ nombre, latitude, longitude, radio: 100 });
+        await sede.save();
+
+        await User.findByIdAndUpdate(userId, { sede: sede._id });
+
+        return res.status(200).json({ sede });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({ error: 'Internal Server Error' });
+    }
+};
+
 module.exports = {
     insertSede,
     getAllSedes,
     updateSede,
-    deleteSede
+    deleteSede,
+    registerFromDevice
 }
 

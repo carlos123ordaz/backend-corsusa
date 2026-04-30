@@ -9,7 +9,7 @@ const login = async (req, res) => {
         if (!email || !password) {
             return res.status(400).send({ error: 'email y contraseña son requeridos' });
         }
-        const userFound = await User.findOne({ email }).select('+password').populate('areas').populate('role');
+        const userFound = await User.findOne({ email }).select('+password').populate('areas').populate('role').populate('sede');
         if (!userFound) {
             return res.status(401).send({ error: 'El email o la contraseña no son correctos' });
         }
@@ -37,7 +37,7 @@ const login = async (req, res) => {
             { expiresIn: JWT_REFRESH_EXPIRES_IN }
         );
         const user = {
-            userId: userFound._id,
+            _id: userFound._id,
             name: userFound.name,
             lname: userFound.lname,
             email: userFound.email,

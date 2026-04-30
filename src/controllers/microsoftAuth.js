@@ -86,7 +86,7 @@ const microsoftCallback = async (req, res) => {
                 { microsoftId: msProfile.id },
                 { email: email }
             ]
-        }).populate('areas');
+        }).populate('areas').populate('sede');
 
         if (!user) {
             user = await User.create({
