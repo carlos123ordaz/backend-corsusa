@@ -40,19 +40,23 @@ const getUsers = async (req, res) => {
             filter.areas = area || areaId;
         }
 
+        const isPaginated = page !== undefined;
         const pageNum = Math.max(1, parseInt(page) || 1);
         const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 15));
         const skip = (pageNum - 1) * limitNum;
 
+        let query = User.find(filter)
+            .populate('areas')
+            .populate('role')
+            .populate('sede')
+            .sort({ _id: -1 });
+
+        if (isPaginated) {
+            query = query.skip(skip).limit(limitNum);
+        }
+
         const [users, total] = await Promise.all([
-            User.find(filter)
-                .populate('areas')
-                .populate('role')
-                .populate('sede')
-                .sort({ _id: -1 })
-                .skip(skip)
-                .limit(limitNum)
-                .lean(),
+            query.lean(),
             User.countDocuments(filter),
         ]);
 
