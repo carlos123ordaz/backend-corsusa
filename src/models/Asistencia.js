@@ -32,6 +32,14 @@ const AsistenciaSchema = Schema({
     valido_salida: Boolean,
     sede: { type: Schema.Types.ObjectId, ref: 'Sede' },
 
+    // Snapshot de la sede al momento del registro (persiste aunque se elimine la sede)
+    sedeSnapshot: {
+        nombre: { type: String, default: null },
+        latitude: { type: String, default: null },
+        longitude: { type: String, default: null },
+        radio: { type: Number, default: null },
+    },
+
     // Puntaje de similitud facial (para auditoría)
     similarity_entrada: { type: Number, default: null },
     similarity_salida: { type: Number, default: null },
