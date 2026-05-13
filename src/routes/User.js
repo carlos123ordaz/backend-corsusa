@@ -7,11 +7,13 @@ const {
     deleteUser,
     savePushToken,
     removePushToken,
-    getUserPushTokens
+    getUserPushTokens,
+    syncFromBitrix,
 } = require('../controllers/User');
 const authMiddleware = require('../middleware/auth');
 const router = express.Router();
 
+router.post('/sync-bitrix', authMiddleware, syncFromBitrix);
 router.post('/push-token', savePushToken);
 router.delete('/push-token', authMiddleware, removePushToken);
 router.get('/:userId/push-tokens', authMiddleware, getUserPushTokens);

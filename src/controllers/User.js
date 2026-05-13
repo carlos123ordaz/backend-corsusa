@@ -1,6 +1,7 @@
 const Gira = require("../models/Gira");
 const User = require("../models/User");
 const bcrypt = require('bcrypt');
+const axios = require('axios');
 
 const getUserById = async (req, res) => {
     try {
@@ -264,6 +265,90 @@ const getUserPushTokens = async (req, res) => {
     }
 };
 
+const soloNumeros = (str) => (str ? String(str).replace(/\D/g, '') : '');
+
+const syncFromBitrix = async (req, res) => {
+    try {
+        const webhookBase = process.env.BITRIX_WEBHOOK_URL;
+        if (!webhookBase) {
+            return res.status(500).json({ error: 'BITRIX_WEBHOOK_URL no configurado' });
+        }
+
+        // Traer todos los usuarios de Bitrix (paginado)
+        const bitrixUsers = [];
+        let start = 0;
+        while (true) {
+            const { data } = await axios.get(`${webhookBase}/user.get`, {
+                params: { start, ACTIVE: false },
+            });
+            bitrixUsers.push(...data.result);
+            if (data.next !== undefined) {
+                start = data.next;
+            } else {
+                break;
+            }
+        }
+
+        // DNIs y correos existentes en DB para filtrar duplicados
+        const existing = await User.find({}, { dni: 1, email: 1, _id: 0 }).lean();
+        const existingDnis = new Set(existing.map((u) => u.dni).filter(Boolean));
+        const existingEmails = new Set(existing.map((u) => u.email).filter(Boolean));
+
+        // Mapear y filtrar
+        const salt = await bcrypt.genSalt(10);
+        const toInsert = [];
+        const skipped = [];
+
+        for (const u of bitrixUsers) {
+            const dni = soloNumeros(u.UF_USR_1583783785065);
+            const email = u.EMAIL || '';
+
+            if (existingDnis.has(dni) || existingEmails.has(email)) {
+                skipped.push({ name: `${u.NAME} ${u.LAST_NAME}`, reason: 'ya existe' });
+                continue;
+            }
+            if (!email) {
+                skipped.push({ name: `${u.NAME} ${u.LAST_NAME}`, reason: 'sin correo' });
+                continue;
+            }
+
+            const password = dni
+                ? await bcrypt.hash(dni, salt)
+                : await bcrypt.hash('corsusa123', salt);
+
+            toInsert.push({
+                name: u.NAME || '',
+                lname: u.LAST_NAME || '',
+                email,
+                dni: dni || undefined,
+                position: u.WORK_POSITION || undefined,
+                phone: u.PERSONAL_PHONE || undefined,
+                active: !!u.ACTIVE,
+                password,
+            });
+
+            // Registrar para no insertar duplicados dentro del mismo batch
+            if (dni) existingDnis.add(dni);
+            existingEmails.add(email);
+        }
+
+        let inserted = [];
+        if (toInsert.length > 0) {
+            inserted = await User.insertMany(toInsert, { ordered: false });
+        }
+
+        return res.status(200).json({
+            total_bitrix: bitrixUsers.length,
+            imported: inserted.length,
+            skipped: skipped.length,
+            skipped_detail: skipped,
+        });
+    } catch (error) {
+        console.error('Error al sincronizar con Bitrix:', error);
+        return res.status(500).json({ error: 'Error al sincronizar con Bitrix', detail: error.message });
+    }
+};
+
 module.exports = {
     getUsers,
     getUserById,
@@ -272,5 +357,6 @@ module.exports = {
     deleteUser,
     savePushToken,
     removePushToken,
-    getUserPushTokens
+    getUserPushTokens,
+    syncFromBitrix,
 };
