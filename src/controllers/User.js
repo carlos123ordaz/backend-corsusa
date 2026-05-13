@@ -332,14 +332,27 @@ const syncFromBitrix = async (req, res) => {
             existingEmails.add(email);
         }
 
-        let inserted = [];
+        let insertedCount = 0;
         if (toInsert.length > 0) {
-            inserted = await User.insertMany(toInsert, { ordered: false });
+            // Usamos la colección raw para evitar que Mongoose aplique default: null
+            // en microsoftId (campo con índice único sparse), lo que causaría conflictos
+            // al insertar múltiples documentos con null simultáneamente.
+            const now = new Date();
+            const rawDocs = toInsert.map((u) => ({
+                ...u,
+                areas: [],
+                pushTokens: [],
+                authProvider: 'local',
+                createdAt: now,
+                updatedAt: now,
+            }));
+            const result = await User.collection.insertMany(rawDocs, { ordered: false });
+            insertedCount = result.insertedCount;
         }
 
         return res.status(200).json({
             total_bitrix: bitrixUsers.length,
-            imported: inserted.length,
+            imported: insertedCount,
             skipped: skipped.length,
             skipped_detail: skipped,
         });
