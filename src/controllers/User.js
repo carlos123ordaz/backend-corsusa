@@ -19,12 +19,10 @@ const getUserById = async (req, res) => {
 
 const getUsers = async (req, res) => {
     try {
-        const { search, active, area, areaId } = req.query;
+        const { search, active, area, areaId, page, limit } = req.query;
 
-        // Construir el filtro
         let filter = {};
 
-        // Filtro por búsqueda (nombre, email, DNI)
         if (search) {
             filter.$or = [
                 { name: { $regex: search, $options: 'i' } },
@@ -34,30 +32,36 @@ const getUsers = async (req, res) => {
             ];
         }
 
-        // Filtro por estado activo/inactivo
         if (active !== undefined) {
             filter.active = active === 'true';
         }
 
-        // Filtro por área (ID del área)
         if (area || areaId) {
             filter.areas = area || areaId;
         }
 
-        // Obtener usuarios con áreas pobladas
-        const users = await User.find(filter)
-            .populate('areas')
-            .populate('role')
-            .populate('sede')
-            .sort({ _id: -1 })
-            .lean();
+        const pageNum = Math.max(1, parseInt(page) || 1);
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 15));
+        const skip = (pageNum - 1) * limitNum;
 
-        const usersWithEmbedding = users.map(u => ({
+        const [users, total] = await Promise.all([
+            User.find(filter)
+                .populate('areas')
+                .populate('role')
+                .populate('sede')
+                .sort({ _id: -1 })
+                .skip(skip)
+                .limit(limitNum)
+                .lean(),
+            User.countDocuments(filter),
+        ]);
+
+        const data = users.map(u => ({
             ...u,
             hasEmbedding: Array.isArray(u.embedding) && u.embedding.length > 0,
         }));
 
-        return res.status(200).json(usersWithEmbedding);
+        return res.status(200).json({ data, total });
     } catch (error) {
         console.error(error);
         return res.status(500).json({ error: 'Internal Server Error' });

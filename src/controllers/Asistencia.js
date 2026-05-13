@@ -407,6 +407,39 @@ exports.getAsistenciasAdminByDate = async (req, res) => {
 };
 
 /**
+ * Actualizar un registro de asistencia (entrada, salida, validez)
+ */
+exports.updateAsistencia = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { entrada, salida, valido_entrada, valido_salida } = req.body;
+
+        const asistencia = await Asistencia.findById(id);
+        if (!asistencia) {
+            return res.status(404).json({ success: false, message: 'Registro no encontrado' });
+        }
+
+        if (entrada !== undefined) asistencia.entrada = new Date(entrada);
+        if (salida !== undefined) asistencia.salida = new Date(salida);
+        if (valido_entrada !== undefined) asistencia.valido_entrada = valido_entrada;
+        if (valido_salida !== undefined) asistencia.valido_salida = valido_salida;
+
+        if (asistencia.entrada && asistencia.salida) {
+            const diffMs = new Date(asistencia.salida).getTime() - new Date(asistencia.entrada).getTime();
+            asistencia.horas_trabajadas = Math.max(0, diffMs / (1000 * 60 * 60));
+        }
+
+        await asistencia.save();
+        await asistencia.populate('user', 'name lname email');
+
+        res.json({ success: true, data: asistencia, message: 'Registro actualizado correctamente' });
+    } catch (error) {
+        console.error('Error en updateAsistencia:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
  * Función auxiliar para calcular distancia entre dos puntos (Haversine)
  */
 function calcularDistancia(lat1, lon1, lat2, lon2) {

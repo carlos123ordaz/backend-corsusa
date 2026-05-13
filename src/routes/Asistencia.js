@@ -1,6 +1,7 @@
 const express = require('express');
 const {
     insertAsistencia,
+    updateAsistencia,
     getAsistenciasByDate,
     getAsistenciaByUser,
     getAsistenciasByDateRange,
@@ -10,8 +11,11 @@ const {
 const authMiddleware = require('../middleware/auth');
 const router = express.Router();
 
-// Registrar entrada o salida (requiere token JWT - la validación facial real ocurre en el Python API)
+// Registrar entrada o salida
 router.post('/', authMiddleware, insertAsistencia);
+
+// Actualizar un registro de asistencia (admin)
+router.put('/:id', authMiddleware, updateAsistencia);
 
 // Obtener asistencia de un usuario (hoy)
 router.get('/user/:id', getAsistenciaByUser);
