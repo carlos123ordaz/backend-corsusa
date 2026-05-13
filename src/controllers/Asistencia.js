@@ -3,6 +3,28 @@ const ScheduleConfig = require('../models/ScheduleConfig');
 const User = require('../models/User');
 const Sede = require('../models/Sede');
 
+// Lima is UTC-5. All date ranges must be computed in Lima local time.
+const LIMA_OFFSET_HOURS = 5;
+
+function limaDateRangeUTC(dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const start = new Date(Date.UTC(y, m - 1, d, LIMA_OFFSET_HOURS, 0, 0, 0));
+    const end = new Date(Date.UTC(y, m - 1, d + 1, LIMA_OFFSET_HOURS, 0, 0, 0) - 1);
+    return { start, end };
+}
+
+function getLimaTodayRange() {
+    const now = new Date();
+    const limaMs = now.getTime() - LIMA_OFFSET_HOURS * 3600000;
+    const limaDate = new Date(limaMs);
+    const y = limaDate.getUTCFullYear();
+    const m = limaDate.getUTCMonth();
+    const d = limaDate.getUTCDate();
+    const hoy = new Date(Date.UTC(y, m, d, LIMA_OFFSET_HOURS, 0, 0, 0));
+    const manana = new Date(Date.UTC(y, m, d + 1, LIMA_OFFSET_HOURS, 0, 0, 0));
+    return { hoy, manana };
+}
+
 exports.insertAsistencia = async (req, res) => {
     try {
         const { userId, tipo, latitude, longitude } = req.body;
@@ -44,10 +66,7 @@ exports.insertAsistencia = async (req, res) => {
             user.sede ? Sede.findById(user.sede) : null,
             ScheduleConfig.findOne({ userId, active: true }).lean(),
         ]);
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        const manana = new Date(hoy);
-        manana.setDate(manana.getDate() + 1);
+        const { hoy, manana } = getLimaTodayRange();
         let asistencia = await Asistencia.findOne({
             user: userId,
             createdAt: {
@@ -182,10 +201,7 @@ exports.getAsistenciasByDate = async (req, res) => {
             });
         }
 
-        // Parsear la fecha
-        const [year, month, day] = fecha.split('-').map(Number);
-        const fechaInicio = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
-        const fechaFin = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+        const { start: fechaInicio, end: fechaFin } = limaDateRangeUTC(fecha);
 
         const asistencias = await Asistencia.find({
             createdAt: {
@@ -225,11 +241,7 @@ exports.getAsistenciaByUser = async (req, res) => {
             });
         }
 
-        // Buscar asistencia del día actual completo
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        const manana = new Date(hoy);
-        manana.setDate(manana.getDate() + 1);
+        const { hoy, manana } = getLimaTodayRange();
         const asistencia = await Asistencia.findOne({
             user: id,
             createdAt: {
@@ -267,10 +279,8 @@ exports.getAsistenciasByDateRange = async (req, res) => {
                 message: 'startDate y endDate son requeridos',
             });
         }
-        const fechaInicio = new Date(startDate);
-        fechaInicio.setHours(0, 0, 0, 0);
-        const fechaFin = new Date(endDate);
-        fechaFin.setHours(23, 59, 59, 999);
+        const { start: fechaInicio } = limaDateRangeUTC(startDate);
+        const { end: fechaFin } = limaDateRangeUTC(endDate);
         const asistencias = await Asistencia.find({
             createdAt: {
                 $gte: fechaInicio,
@@ -360,9 +370,7 @@ exports.getAsistenciasAdminByDate = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Fecha es requerida' });
         }
 
-        const [year, month, day] = fecha.split('-').map(Number);
-        const fechaInicio = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
-        const fechaFin = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+        const { start: fechaInicio, end: fechaFin } = limaDateRangeUTC(fecha);
 
         const [users, asistencias] = await Promise.all([
             User.find({ active: true })
