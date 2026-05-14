@@ -274,7 +274,7 @@ const syncFromBitrix = async (req, res) => {
             return res.status(500).json({ error: 'BITRIX_WEBHOOK_URL no configurado' });
         }
 
-        // Traer todos los usuarios de Bitrix (paginado)
+        // Traer todos los usuarios de Bitrix (paginado, activos e inactivos)
         const bitrixUsers = [];
         let start = 0;
         while (true) {
@@ -289,12 +289,15 @@ const syncFromBitrix = async (req, res) => {
             }
         }
 
-        // DNIs y correos existentes en DB para filtrar duplicados
-        const existing = await User.find({}, { dni: 1, email: 1, _id: 0 }).lean();
+        // Traer usuarios existentes en DB con campos necesarios para import y desactivación
+        const existing = await User.find({}, { dni: 1, email: 1, active: 1, name: 1, lname: 1 }).lean();
+
+        const existingByDni = new Map(existing.filter((u) => u.dni).map((u) => [u.dni, u]));
+        const existingByEmail = new Map(existing.filter((u) => u.email).map((u) => [u.email, u]));
         const existingDnis = new Set(existing.map((u) => u.dni).filter(Boolean));
         const existingEmails = new Set(existing.map((u) => u.email).filter(Boolean));
 
-        // Mapear y filtrar
+        // ── Importar usuarios nuevos ──────────────────────────────────────────
         const salt = await bcrypt.genSalt(10);
         const toInsert = [];
         const skipped = [];
@@ -350,11 +353,37 @@ const syncFromBitrix = async (req, res) => {
             insertedCount = result.insertedCount;
         }
 
+        // ── Desactivar usuarios inactivos en Bitrix que están activos en DB ──
+        const idsToDeactivate = [];
+        const deactivatedDetail = [];
+
+        for (const u of bitrixUsers.filter((b) => !b.ACTIVE)) {
+            const dni = soloNumeros(u.UF_USR_1583783785065);
+            const email = u.EMAIL || '';
+
+            const dbUser = (dni && existingByDni.get(dni)) || (email && existingByEmail.get(email));
+            if (dbUser && dbUser.active) {
+                idsToDeactivate.push(dbUser._id);
+                deactivatedDetail.push({ name: `${u.NAME} ${u.LAST_NAME}` });
+            }
+        }
+
+        let deactivatedCount = 0;
+        if (idsToDeactivate.length > 0) {
+            const updateResult = await User.updateMany(
+                { _id: { $in: idsToDeactivate } },
+                { active: false }
+            );
+            deactivatedCount = updateResult.modifiedCount;
+        }
+
         return res.status(200).json({
             total_bitrix: bitrixUsers.length,
             imported: insertedCount,
             skipped: skipped.length,
             skipped_detail: skipped,
+            deactivated: deactivatedCount,
+            deactivated_detail: deactivatedDetail,
         });
     } catch (error) {
         console.error('Error al sincronizar con Bitrix:', error);
