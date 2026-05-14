@@ -274,20 +274,25 @@ const syncFromBitrix = async (req, res) => {
             return res.status(500).json({ error: 'BITRIX_WEBHOOK_URL no configurado' });
         }
 
-        // Traer todos los usuarios de Bitrix (paginado, activos e inactivos)
-        const bitrixUsers = [];
-        let start = 0;
-        while (true) {
-            const { data } = await axios.get(`${webhookBase}/user.get`, {
-                params: { start, ACTIVE: false },
-            });
-            bitrixUsers.push(...data.result);
-            if (data.next !== undefined) {
-                start = data.next;
-            } else {
-                break;
+        // Traer usuarios de Bitrix en dos llamadas separadas con valores válidos 'Y'/'N'
+        const fetchPages = async (active) => {
+            const users = [];
+            let start = 0;
+            while (true) {
+                const { data } = await axios.get(`${webhookBase}/user.get`, {
+                    params: { start, ACTIVE: active },
+                });
+                users.push(...data.result);
+                if (data.next !== undefined) start = data.next;
+                else break;
             }
-        }
+            return users;
+        };
+
+        const [activeBitrixUsers, inactiveBitrixUsers] = await Promise.all([
+            fetchPages('Y'),
+            fetchPages('N'),
+        ]);
 
         // Traer usuarios existentes en DB con campos necesarios para import y desactivación
         const existing = await User.find({}, { dni: 1, email: 1, active: 1, name: 1, lname: 1 }).lean();
@@ -297,12 +302,12 @@ const syncFromBitrix = async (req, res) => {
         const existingDnis = new Set(existing.map((u) => u.dni).filter(Boolean));
         const existingEmails = new Set(existing.map((u) => u.email).filter(Boolean));
 
-        // ── Importar usuarios nuevos ──────────────────────────────────────────
+        // ── Importar usuarios nuevos (solo los activos en Bitrix) ────────────
         const salt = await bcrypt.genSalt(10);
         const toInsert = [];
         const skipped = [];
 
-        for (const u of bitrixUsers) {
+        for (const u of activeBitrixUsers) {
             const dni = soloNumeros(u.UF_USR_1583783785065);
             const email = u.EMAIL || '';
 
@@ -325,7 +330,7 @@ const syncFromBitrix = async (req, res) => {
                 email,
                 dni: dni || undefined,
                 position: u.WORK_POSITION || undefined,
-                phone: u.PERSONAL_PHONE || undefined,
+                phone: u.PERSONAL_MOBILE || u.PERSONAL_PHONE || undefined,
                 active: !!u.ACTIVE && u.ACTIVE !== 'N',
                 password,
             });
@@ -357,8 +362,7 @@ const syncFromBitrix = async (req, res) => {
         const idsToDeactivate = [];
         const deactivatedDetail = [];
 
-        const isInactive = (u) => !u.ACTIVE || u.ACTIVE === 'N';
-        for (const u of bitrixUsers.filter(isInactive)) {
+        for (const u of inactiveBitrixUsers) {
             const dni = soloNumeros(u.UF_USR_1583783785065);
             const email = u.EMAIL || '';
 
@@ -379,7 +383,7 @@ const syncFromBitrix = async (req, res) => {
         }
 
         return res.status(200).json({
-            total_bitrix: bitrixUsers.length,
+            total_bitrix: activeBitrixUsers.length + inactiveBitrixUsers.length,
             imported: insertedCount,
             skipped: skipped.length,
             skipped_detail: skipped,
