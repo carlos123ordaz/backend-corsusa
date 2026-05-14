@@ -326,7 +326,7 @@ const syncFromBitrix = async (req, res) => {
                 dni: dni || undefined,
                 position: u.WORK_POSITION || undefined,
                 phone: u.PERSONAL_PHONE || undefined,
-                active: !!u.ACTIVE,
+                active: !!u.ACTIVE && u.ACTIVE !== 'N',
                 password,
             });
 
@@ -357,7 +357,8 @@ const syncFromBitrix = async (req, res) => {
         const idsToDeactivate = [];
         const deactivatedDetail = [];
 
-        for (const u of bitrixUsers.filter((b) => !b.ACTIVE)) {
+        const isInactive = (u) => !u.ACTIVE || u.ACTIVE === 'N';
+        for (const u of bitrixUsers.filter(isInactive)) {
             const dni = soloNumeros(u.UF_USR_1583783785065);
             const email = u.EMAIL || '';
 
