@@ -1,7 +1,9 @@
 const VacEmpleado = require('../models/VacEmpleado');
 const VacSolicitud = require('../models/VacSolicitud');
 const VacPolitica  = require('../models/VacPolitica');
-const User        = require('../models/User');
+const VacFeriado   = require('../models/VacFeriado');
+const Area         = require('../models/Area');
+const User         = require('../models/User');
 const { sendSuccess, sendError } = require('../helpers/responseHelper');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -14,15 +16,64 @@ const TIPOS_CONFIG = {
   'cumple':          { descuenta: false, gozaSueldo: true  },
 };
 
-// Feriados Perú — se extiende anualmente si fuera necesario
-const FERIADOS_PE = new Set([
-  '2025-01-01','2025-04-17','2025-04-18','2025-05-01','2025-06-07',
-  '2025-06-29','2025-07-28','2025-07-29','2025-08-30','2025-10-08',
-  '2025-11-01','2025-12-08','2025-12-25',
-  '2026-01-01','2026-04-02','2026-04-03','2026-05-01','2026-06-07',
-  '2026-06-29','2026-07-23','2026-07-28','2026-07-29','2026-08-30',
-  '2026-10-08','2026-11-01','2026-12-08','2026-12-25',
-]);
+// Datos semilla para poblar la BD en el primer arranque
+const FERIADOS_SEED = {
+  '2025-01-01': 'Año Nuevo',
+  '2025-04-17': 'Jueves Santo',
+  '2025-04-18': 'Viernes Santo',
+  '2025-05-01': 'Día del Trabajo',
+  '2025-06-07': 'Batalla de Arica',
+  '2025-06-29': 'San Pedro y San Pablo',
+  '2025-07-28': 'Independencia',
+  '2025-07-29': 'Independencia',
+  '2025-08-30': 'Santa Rosa de Lima',
+  '2025-10-08': 'Combate de Angamos',
+  '2025-11-01': 'Todos los Santos',
+  '2025-12-08': 'Inmaculada Concepción',
+  '2025-12-25': 'Navidad',
+  '2026-01-01': 'Año Nuevo',
+  '2026-04-02': 'Jueves Santo',
+  '2026-04-03': 'Viernes Santo',
+  '2026-05-01': 'Día del Trabajo',
+  '2026-06-07': 'Batalla de Arica',
+  '2026-06-29': 'San Pedro y San Pablo',
+  '2026-07-23': 'Día de la Fuerza Aérea',
+  '2026-07-28': 'Independencia',
+  '2026-07-29': 'Independencia',
+  '2026-08-30': 'Santa Rosa de Lima',
+  '2026-10-08': 'Combate de Angamos',
+  '2026-11-01': 'Todos los Santos',
+  '2026-12-08': 'Inmaculada Concepción',
+  '2026-12-25': 'Navidad',
+};
+
+// Colores por defecto según el código de área (se aplican si Area.color no ha sido personalizado)
+const DEFAULT_AREA_COLORS = {
+  td:    '#2563eb',
+  ops:   '#0a9d6f',
+  comer: '#ea8035',
+  fin:   '#8a4ad1',
+  rrhh:  '#d65a96',
+};
+
+// ─── Feriados Cache (para countWorkdays síncrono) ─────────────────────────────
+
+let _feriadosCache = null;
+const invalidateFeriadosCache = () => { _feriadosCache = null; };
+
+async function getFeriadosSet() {
+  if (_feriadosCache) return _feriadosCache;
+  let docs = await VacFeriado.find().lean();
+  if (docs.length === 0) {
+    const toInsert = Object.entries(FERIADOS_SEED).map(([iso, nombre]) => ({
+      iso, nombre, year: parseInt(iso.substring(0, 4)),
+    }));
+    await VacFeriado.insertMany(toInsert, { ordered: false }).catch(() => {});
+    docs = await VacFeriado.find().lean();
+  }
+  _feriadosCache = new Set(docs.map(d => d.iso));
+  return _feriadosCache;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,14 +83,15 @@ function toIsoDate(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-function countWorkdays(desde, hasta) {
+async function countWorkdays(desde, hasta) {
+  const feriados = await getFeriadosSet();
   const start = new Date(desde + 'T12:00:00');
   const end   = new Date(hasta + 'T12:00:00');
   let count   = 0;
   const cur   = new Date(start);
   while (cur <= end) {
     const wd = cur.getDay();
-    if (wd !== 0 && wd !== 6 && !FERIADOS_PE.has(toIsoDate(cur))) count++;
+    if (wd !== 0 && wd !== 6 && !feriados.has(toIsoDate(cur))) count++;
     cur.setDate(cur.getDate() + 1);
   }
   return count;
@@ -87,6 +139,36 @@ function formatSolicitud(doc) {
   return result;
 }
 
+// ─── Áreas ────────────────────────────────────────────────────────────────────
+
+// Derivar el código corto de área desde el doc de Area
+// Usa shortName si está definido, si no aplica el mismo mapeo regex de mapAreaName
+function areaDocToCode(areaDoc) {
+  if (areaDoc.shortName) return areaDoc.shortName.toLowerCase();
+  return mapAreaName(areaDoc.name) || null;
+}
+
+const getAreas = async (_req, res) => {
+  try {
+    const docs = await Area.find({ status: 'active' }).sort({ name: 1 }).lean();
+    const areas = docs
+      .map(a => {
+        const code = areaDocToCode(a);
+        if (!code) return null;
+        return {
+          id:    code,
+          label: a.name,
+          // Usa el color almacenado si fue personalizado, si no aplica el default por código
+          color: (a.color && a.color !== '#6b7280') ? a.color : (DEFAULT_AREA_COLORS[code] || '#6b7280'),
+        };
+      })
+      .filter(Boolean);
+    return sendSuccess(res, areas);
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
 // ─── Empleados ────────────────────────────────────────────────────────────────
 
 const getEmpleados = async (req, res) => {
@@ -104,7 +186,6 @@ const getEmpleados = async (req, res) => {
 
     let docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
 
-    // Si la colección está vacía (primera vez), auto-sincronizar desde Users
     if (docs.length === 0 && !area && !search) {
       await _doSyncFromUsers({ dryRun: false, modo: 'solo-nuevos' });
       docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
@@ -132,9 +213,13 @@ const createEmpleado = async (req, res) => {
     if (!name || !area || !ingreso) {
       return sendError(res, 'name, area e ingreso son requeridos', 400);
     }
-    if (!['td','ops','comer','fin','rrhh'].includes(area)) {
-      return sendError(res, 'Área inválida. Valores: td, ops, comer, fin, rrhh', 400);
+
+    const areaDocs = await Area.find({ status: 'active' }).lean();
+    const validCodes = areaDocs.map(areaDocToCode).filter(Boolean);
+    if (!validCodes.includes(area)) {
+      return sendError(res, `Área inválida. Valores: ${validCodes.join(', ')}`, 400);
     }
+
     if (leadId) {
       const lead = await VacEmpleado.findById(leadId);
       if (!lead) return sendError(res, 'Líder no encontrado', 404);
@@ -158,6 +243,13 @@ const updateEmpleado = async (req, res) => {
     const update  = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    if (update.area) {
+      const areaDocs = await Area.find({ status: 'active' }).lean();
+      const validCodes = areaDocs.map(areaDocToCode).filter(Boolean);
+      if (!validCodes.includes(update.area)) {
+        return sendError(res, `Área inválida: ${update.area}`, 400);
+      }
     }
     const doc = await VacEmpleado.findByIdAndUpdate(
       req.params.id,
@@ -229,12 +321,11 @@ const createSolicitud = async (req, res) => {
       return sendError(res, 'Empleado no encontrado o inactivo', 404);
     }
 
-    const dias = countWorkdays(desde, hasta);
+    const dias = await countWorkdays(desde, hasta);
     if (dias < 1) {
       return sendError(res, 'El rango de fechas no contiene días hábiles', 400);
     }
 
-    // Validar saldo si el tipo descuenta
     if (TIPOS_CONFIG[tipo].descuenta) {
       const disponible = emp.saldoTotal - emp.tomados - emp.pendientes;
       if (disponible < dias) {
@@ -246,7 +337,6 @@ const createSolicitud = async (req, res) => {
       }
     }
 
-    // Verificar solapamiento con solicitudes activas
     const overlap = await VacSolicitud.findOne({
       empId,
       estado: { $in: ['pendiente', 'aprobado'] },
@@ -261,31 +351,20 @@ const createSolicitud = async (req, res) => {
       );
     }
 
-    // Determinar aprobador y nivel
     let aprobadorId = emp.leadId || null;
     let nivel = dias > 5 ? 'rrhh' : 'lider';
 
     if (!aprobadorId) {
-      // Sin líder → va directo a RRHH
       const rrhhLead = await VacEmpleado.findOne({ area: 'rrhh', leadId: null, active: true });
       aprobadorId = rrhhLead ? rrhhLead._id : null;
       nivel = 'rrhh';
     }
 
     const solicitud = await VacSolicitud.create({
-      empId,
-      tipo,
-      desde,
-      hasta,
-      dias,
-      motivo,
-      aprobadorId,
-      nivel,
-      estado: 'pendiente',
-      solicitada: new Date(),
+      empId, tipo, desde, hasta, dias, motivo,
+      aprobadorId, nivel, estado: 'pendiente', solicitada: new Date(),
     });
 
-    // Reservar días pendientes si el tipo descuenta del saldo
     if (TIPOS_CONFIG[tipo].descuenta) {
       await VacEmpleado.findByIdAndUpdate(empId, { $inc: { pendientes: dias } });
     }
@@ -367,7 +446,7 @@ const getDashboard = async (req, res) => {
     const rechazados  = solicitudes.filter(s => s.estado === 'rechazado').length;
 
     const today = toIsoDate(new Date());
-    const mesActual = today.substring(0, 7); // YYYY-MM
+    const mesActual = today.substring(0, 7);
 
     const diasEsteMes = solicitudes
       .filter(s => s.estado === 'aprobado' && s.desde.startsWith(mesActual))
@@ -394,14 +473,9 @@ const getDashboard = async (req, res) => {
 
     return sendSuccess(res, {
       totalEmpleados: empleados.length,
-      pendientes,
-      aprobados,
-      rechazados,
-      diasEsteMes,
-      totalDisponibles,
-      ausenciasHoy,
-      recientes,
-      bajosaldo,
+      pendientes, aprobados, rechazados,
+      diasEsteMes, totalDisponibles,
+      ausenciasHoy, recientes, bajosaldo,
     });
   } catch (err) {
     return sendError(res, err.message);
@@ -414,7 +488,7 @@ const getCalendario = async (req, res) => {
   try {
     const now   = new Date();
     const y     = parseInt(req.query.year)  || now.getFullYear();
-    const m     = parseInt(req.query.month) || now.getMonth() + 1; // 1-based
+    const m     = parseInt(req.query.month) || now.getMonth() + 1;
     const desde = `${y}-${pad2(m)}-01`;
     const lastD = new Date(y, m, 0).getDate();
     const hasta = `${y}-${pad2(m)}-${pad2(lastD)}`;
@@ -548,23 +622,46 @@ const updatePoliticas = async (req, res) => {
 
 // ─── Feriados ─────────────────────────────────────────────────────────────────
 
-const getFeriados = async (_req, res) => {
-  return sendSuccess(res, {
-    '2026-01-01': 'Año Nuevo',
-    '2026-04-02': 'Jueves Santo',
-    '2026-04-03': 'Viernes Santo',
-    '2026-05-01': 'Día del Trabajo',
-    '2026-06-07': 'Batalla de Arica',
-    '2026-06-29': 'San Pedro y San Pablo',
-    '2026-07-23': 'Día de la Fuerza Aérea',
-    '2026-07-28': 'Independencia',
-    '2026-07-29': 'Independencia',
-    '2026-08-30': 'Santa Rosa de Lima',
-    '2026-10-08': 'Combate de Angamos',
-    '2026-11-01': 'Todos los Santos',
-    '2026-12-08': 'Inmaculada Concepción',
-    '2026-12-25': 'Navidad',
-  });
+const getFeriados = async (req, res) => {
+  try {
+    // Asegura que la semilla esté cargada en BD
+    await getFeriadosSet();
+    const filter = {};
+    if (req.query.year) filter.year = parseInt(req.query.year);
+    const docs = await VacFeriado.find(filter).sort({ iso: 1 }).lean();
+    return sendSuccess(res, Object.fromEntries(docs.map(d => [d.iso, d.nombre])));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+const createFeriado = async (req, res) => {
+  try {
+    const { iso, nombre } = req.body;
+    if (!iso || !nombre) return sendError(res, 'iso y nombre son requeridos', 400);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      return sendError(res, 'iso debe tener formato YYYY-MM-DD', 400);
+    }
+    const year = parseInt(iso.substring(0, 4));
+    const doc = await VacFeriado.create({ iso, nombre: nombre.trim(), year });
+    invalidateFeriadosCache();
+    return sendSuccess(res, { iso: doc.iso, nombre: doc.nombre }, 201);
+  } catch (err) {
+    if (err.code === 11000) return sendError(res, 'Ya existe un feriado con esa fecha', 409);
+    return sendError(res, err.message);
+  }
+};
+
+const deleteFeriado = async (req, res) => {
+  try {
+    const { iso } = req.params;
+    const doc = await VacFeriado.findOneAndDelete({ iso });
+    if (!doc) return sendError(res, 'Feriado no encontrado', 404);
+    invalidateFeriadosCache();
+    return sendSuccess(res, { deleted: iso });
+  } catch (err) {
+    return sendError(res, err.message);
+  }
 };
 
 // ─── Seed ─────────────────────────────────────────────────────────────────────
@@ -666,8 +763,6 @@ const seedData = async (req, res) => {
 
 // ─── Sync desde Users ─────────────────────────────────────────────────────────
 
-// ─── Sync desde Users (lógica interna) ───────────────────────────────────────
-
 const AVATARS = [
   'var(--av-blue)', 'var(--av-red)',    'var(--av-green)', 'var(--av-orange)',
   'var(--av-purple)', 'var(--av-teal)', 'var(--av-pink)',  'var(--av-amber)',
@@ -759,6 +854,8 @@ const syncFromUsers = async (req, res) => {
 };
 
 module.exports = {
+  // Áreas
+  getAreas,
   // Empleados
   getEmpleados,
   getEmpleadoById,
@@ -775,7 +872,10 @@ module.exports = {
   getDashboard,
   getCalendario,
   getReportes,
+  // Feriados
   getFeriados,
+  createFeriado,
+  deleteFeriado,
   // Políticas
   getPoliticas,
   updatePoliticas,

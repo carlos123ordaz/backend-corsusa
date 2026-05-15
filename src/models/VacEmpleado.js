@@ -3,7 +3,7 @@ const { Schema, model } = require('mongoose');
 const VacEmpleadoSchema = new Schema({
   name:       { type: String, required: true, trim: true },
   role:       { type: String, default: '' },
-  area:       { type: String, required: true, enum: ['td', 'ops', 'comer', 'fin', 'rrhh'] },
+  area:       { type: String, required: true },
   leadId:     { type: Schema.Types.ObjectId, ref: 'VacEmpleado', default: null },
   avatar:     { type: String, default: 'var(--av-blue)' },
   ingreso:    { type: Date, required: true },

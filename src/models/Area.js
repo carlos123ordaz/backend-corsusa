@@ -14,6 +14,10 @@ const areaSchema = new mongoose.Schema(
             type: String,
             trim: true,
         },
+        color: {
+            type: String,
+            default: '#6b7280',
+        },
         status: {
             type: String,
             enum: ['active', 'inactive'],
