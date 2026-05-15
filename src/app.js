@@ -46,6 +46,8 @@ app.use('/api/images', require('./routes/imageRoutes'));
 app.use('/api/bitrix/tasks', require('./routes/bitrixTaskRoutes'));
 app.use('/api/bitrix/users', require('./routes/bitrixUserRoutes'));
 
+app.use('/api/vacaciones', require('./routes/vacacionesRoutes'));
+
 const { registerQuotationRoutes } = require('./routes/quotationModule');
 registerQuotationRoutes(app);
 
