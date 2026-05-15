@@ -56,9 +56,10 @@ const DEFAULT_AREA_COLORS = {
   rrhh:  '#d65a96',
 };
 
-// ─── Feriados Cache (para countWorkdays síncrono) ─────────────────────────────
+// ─── Caches ───────────────────────────────────────────────────────────────────
 
-let _feriadosCache = null;
+let _lastUserSyncAt = 0;     // timestamp del último sync User→VacEmpleado
+let _feriadosCache  = null;
 const invalidateFeriadosCache = () => { _feriadosCache = null; };
 
 async function getFeriadosSet() {
@@ -184,13 +185,13 @@ const getEmpleados = async (req, res) => {
       ];
     }
 
-    let docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
-
-    if (docs.length === 0 && !area && !search) {
+    // Sync new users from User collection (at most once per 60s)
+    if (Date.now() - _lastUserSyncAt > 60_000) {
       await _doSyncFromUsers({ dryRun: false, modo: 'solo-nuevos' });
-      docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
+      _lastUserSyncAt = Date.now();
     }
 
+    const docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
     return sendSuccess(res, docs.map(formatEmpleado));
   } catch (err) {
     return sendError(res, err.message);
@@ -319,6 +320,14 @@ const createSolicitud = async (req, res) => {
     const emp = await VacEmpleado.findById(empId);
     if (!emp || !emp.active) {
       return sendError(res, 'Empleado no encontrado o inactivo', 404);
+    }
+
+    if (!emp.ingreso || isNaN(new Date(emp.ingreso).getTime())) {
+      return sendError(
+        res,
+        'El empleado no tiene fecha de ingreso registrada. Completa su perfil antes de crear una solicitud.',
+        400
+      );
     }
 
     const dias = await countWorkdays(desde, hasta);
@@ -799,7 +808,7 @@ async function _doSyncFromUsers({ dryRun = false, modo = 'upsert' } = {}) {
     if (!fullName) { resultado.omitidos++; continue; }
 
     const areaObj  = user.areas?.[0];
-    const areaCode = areaObj ? mapAreaName(areaObj.name ?? areaObj.shortName) : null;
+    const areaCode = areaObj ? areaDocToCode(areaObj) : null;
 
     if (!areaCode) {
       resultado.sinArea.push({
