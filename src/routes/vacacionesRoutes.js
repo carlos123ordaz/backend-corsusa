@@ -12,6 +12,12 @@ router.get('/feriados',   c.getFeriados);
 // Seed de datos iniciales (solo desarrollo)
 router.post('/seed', c.seedData);
 
+// Sincronizar empleados desde Users del sistema
+// ?dryRun=true  → simula sin guardar
+// ?modo=upsert  → crea nuevos y actualiza existentes (default)
+// ?modo=solo-nuevos → solo crea los que no tienen VacEmpleado aún
+router.post('/sync-usuarios', c.syncFromUsers);
+
 // Empleados
 router.get('/empleados',             c.getEmpleados);
 router.post('/empleados',            c.createEmpleado);

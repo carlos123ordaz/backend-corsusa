@@ -1,5 +1,6 @@
 const VacEmpleado = require('../models/VacEmpleado');
 const VacSolicitud = require('../models/VacSolicitud');
+const User        = require('../models/User');
 const { sendSuccess, sendError } = require('../helpers/responseHelper');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -584,6 +585,100 @@ const seedData = async (req, res) => {
   }
 };
 
+// ─── Sync desde Users ─────────────────────────────────────────────────────────
+
+const AVATARS = [
+  'var(--av-blue)', 'var(--av-red)',    'var(--av-green)', 'var(--av-orange)',
+  'var(--av-purple)', 'var(--av-teal)', 'var(--av-pink)',  'var(--av-amber)',
+  'var(--av-slate)',
+];
+
+// Mapea el nombre de un Area (en mayúsculas) al código de área de vacaciones
+function mapAreaName(name = '') {
+  const n = name.toLowerCase();
+  if (/digital|tecnolog|sistem|software|ti\b|td\b/.test(n)) return 'td';
+  if (/oper|logist|distribuci|almac/.test(n)) return 'ops';
+  if (/comer|venta|sales|marketing|negoc/.test(n)) return 'comer';
+  if (/financ|contab|admin|tesor|contad/.test(n)) return 'fin';
+  if (/recurso|rrhh|human|people|talent|personal/.test(n)) return 'rrhh';
+  return null; // no detectado → se reporta al cliente
+}
+
+const syncFromUsers = async (req, res) => {
+  try {
+    const dryRun  = req.query.dryRun === 'true';
+    const modo    = req.query.modo ?? 'upsert'; // 'upsert' | 'solo-nuevos'
+
+    // Traer todos los usuarios activos con sus áreas populadas
+    const users = await User.find({ active: true })
+      .populate('areas', 'name shortName')
+      .lean();
+
+    if (users.length === 0) {
+      return sendSuccess(res, { message: 'No hay usuarios activos en el sistema', creados: 0, actualizados: 0, sinArea: [] });
+    }
+
+    // Mapa userId → VacEmpleado existente
+    const existentes = await VacEmpleado.find({
+      userId: { $in: users.map(u => u._id) },
+    }).lean();
+    const existenteMap = Object.fromEntries(existentes.map(e => [e.userId.toString(), e]));
+
+    const resultado = { creados: 0, actualizados: 0, omitidos: 0, sinArea: [], dryRun };
+
+    for (let i = 0; i < users.length; i++) {
+      const user = users[i];
+      const fullName = [user.name, user.lname].filter(Boolean).join(' ').trim();
+      if (!fullName) { resultado.omitidos++; continue; }
+
+      // Detectar área
+      const areaObj = user.areas?.[0]; // tomar la primera área asignada
+      const areaCode = areaObj ? mapAreaName(areaObj.name) : null;
+      if (!areaCode) {
+        resultado.sinArea.push({
+          userId: user._id,
+          nombre: fullName,
+          areaName: areaObj?.name ?? '(sin área asignada)',
+        });
+        // Si no se puede mapear el área, no se puede crear VacEmpleado (campo requerido)
+        resultado.omitidos++;
+        continue;
+      }
+
+      const vacData = {
+        name:       fullName,
+        role:       user.position || '',
+        area:       areaCode,
+        avatar:     AVATARS[i % AVATARS.length],
+        ingreso:    user.createdAt || new Date(),
+        userId:     user._id,
+        active:     user.active,
+        saldoTotal: 30,
+      };
+
+      const existente = existenteMap[user._id.toString()];
+
+      if (!existente) {
+        if (!dryRun) await VacEmpleado.create(vacData);
+        resultado.creados++;
+      } else if (modo === 'upsert') {
+        if (!dryRun) {
+          await VacEmpleado.findByIdAndUpdate(existente._id, {
+            $set: { name: vacData.name, role: vacData.role, area: vacData.area, active: vacData.active },
+          });
+        }
+        resultado.actualizados++;
+      } else {
+        resultado.omitidos++;
+      }
+    }
+
+    return sendSuccess(res, resultado);
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
 module.exports = {
   // Empleados
   getEmpleados,
@@ -604,4 +699,5 @@ module.exports = {
   getFeriados,
   // Dev
   seedData,
+  syncFromUsers,
 };
