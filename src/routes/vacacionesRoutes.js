@@ -9,6 +9,10 @@ router.get('/calendario', c.getCalendario);
 router.get('/reportes',   c.getReportes);
 router.get('/feriados',   c.getFeriados);
 
+// Políticas (singleton)
+router.get('/politicas', c.getPoliticas);
+router.put('/politicas', c.updatePoliticas);
+
 // Seed de datos iniciales (solo desarrollo)
 router.post('/seed', c.seedData);
 

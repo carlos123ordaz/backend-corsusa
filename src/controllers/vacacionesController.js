@@ -1,5 +1,6 @@
 const VacEmpleado = require('../models/VacEmpleado');
 const VacSolicitud = require('../models/VacSolicitud');
+const VacPolitica  = require('../models/VacPolitica');
 const User        = require('../models/User');
 const { sendSuccess, sendError } = require('../helpers/responseHelper');
 
@@ -100,7 +101,15 @@ const getEmpleados = async (req, res) => {
         { role: { $regex: search, $options: 'i' } },
       ];
     }
-    const docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
+
+    let docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
+
+    // Si la colección está vacía (primera vez), auto-sincronizar desde Users
+    if (docs.length === 0 && !area && !search) {
+      await _doSyncFromUsers({ dryRun: false, modo: 'solo-nuevos' });
+      docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
+    }
+
     return sendSuccess(res, docs.map(formatEmpleado));
   } catch (err) {
     return sendError(res, err.message);
@@ -467,6 +476,76 @@ const getReportes = async (req, res) => {
   }
 };
 
+// ─── Políticas ────────────────────────────────────────────────────────────────
+
+const DEFAULT_POLITICA = {
+  diasBase:     30,
+  periodo:      'aniversario',
+  anticipacion: 15,
+  maxBloque:    15,
+  adelantar:    true,
+  doblePaso:    true,
+  autoAprobar:  false,
+  notifEmail:   true,
+  notifSlack:   true,
+  tiposHabilitados: [
+    { id: 'vacaciones',      enabled: true },
+    { id: 'permiso-goce',    enabled: true },
+    { id: 'permiso-singoce', enabled: true },
+    { id: 'medica',          enabled: true },
+    { id: 'cumple',          enabled: true },
+  ],
+};
+
+function formatPolitica(doc) {
+  return {
+    diasBase:         doc.diasBase,
+    periodo:          doc.periodo,
+    anticipacion:     doc.anticipacion,
+    maxBloque:        doc.maxBloque,
+    adelantar:        doc.adelantar,
+    doblePaso:        doc.doblePaso,
+    autoAprobar:      doc.autoAprobar,
+    notifEmail:       doc.notifEmail,
+    notifSlack:       doc.notifSlack,
+    tiposHabilitados: doc.tiposHabilitados,
+  };
+}
+
+const getPoliticas = async (_req, res) => {
+  try {
+    let doc = await VacPolitica.findOne().lean();
+    if (!doc) {
+      doc = (await VacPolitica.create(DEFAULT_POLITICA)).toObject();
+    }
+    return sendSuccess(res, formatPolitica(doc));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+const updatePoliticas = async (req, res) => {
+  try {
+    const allowed = [
+      'diasBase','periodo','anticipacion','maxBloque',
+      'adelantar','doblePaso','autoAprobar',
+      'notifEmail','notifSlack','tiposHabilitados',
+    ];
+    const update = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    const doc = await VacPolitica.findOneAndUpdate(
+      {},
+      { $set: update },
+      { new: true, upsert: true, runValidators: true }
+    ).lean();
+    return sendSuccess(res, formatPolitica(doc));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
 // ─── Feriados ─────────────────────────────────────────────────────────────────
 
 const getFeriados = async (_req, res) => {
@@ -587,93 +666,93 @@ const seedData = async (req, res) => {
 
 // ─── Sync desde Users ─────────────────────────────────────────────────────────
 
+// ─── Sync desde Users (lógica interna) ───────────────────────────────────────
+
 const AVATARS = [
   'var(--av-blue)', 'var(--av-red)',    'var(--av-green)', 'var(--av-orange)',
   'var(--av-purple)', 'var(--av-teal)', 'var(--av-pink)',  'var(--av-amber)',
   'var(--av-slate)',
 ];
 
-// Mapea el nombre de un Area (en mayúsculas) al código de área de vacaciones
 function mapAreaName(name = '') {
   const n = name.toLowerCase();
-  if (/digital|tecnolog|sistem|software|ti\b|td\b/.test(n)) return 'td';
-  if (/oper|logist|distribuci|almac/.test(n)) return 'ops';
-  if (/comer|venta|sales|marketing|negoc/.test(n)) return 'comer';
-  if (/financ|contab|admin|tesor|contad/.test(n)) return 'fin';
-  if (/recurso|rrhh|human|people|talent|personal/.test(n)) return 'rrhh';
-  return null; // no detectado → se reporta al cliente
+  if (/digital|tecnolog|sistem|software|\bti\b|\btd\b/.test(n)) return 'td';
+  if (/comer|venta|sales|marketing|negoc/.test(n))               return 'comer';
+  if (/financ|contab|admin|tesor|contad/.test(n))                return 'fin';
+  if (/recurso|rrhh|human|people|talent|personal/.test(n))       return 'rrhh';
+  if (/oper|logist|distribuci|almac/.test(n))                    return 'ops';
+  return null;
+}
+
+async function _doSyncFromUsers({ dryRun = false, modo = 'upsert' } = {}) {
+  const users = await User.find({ active: true })
+    .populate('areas', 'name shortName')
+    .lean();
+
+  if (users.length === 0) return { creados: 0, actualizados: 0, omitidos: 0, sinArea: [] };
+
+  const existentes = await VacEmpleado.find({
+    userId: { $in: users.map(u => u._id) },
+  }).lean();
+  const existenteMap = Object.fromEntries(existentes.map(e => [e.userId.toString(), e]));
+
+  const resultado = { creados: 0, actualizados: 0, omitidos: 0, sinArea: [] };
+
+  for (let i = 0; i < users.length; i++) {
+    const user     = users[i];
+    const fullName = [user.name, user.lname].filter(Boolean).join(' ').trim();
+    if (!fullName) { resultado.omitidos++; continue; }
+
+    const areaObj  = user.areas?.[0];
+    const areaCode = areaObj ? mapAreaName(areaObj.name ?? areaObj.shortName) : null;
+
+    if (!areaCode) {
+      resultado.sinArea.push({
+        userId:   user._id,
+        nombre:   fullName,
+        areaName: areaObj?.name ?? '(sin área)',
+      });
+      resultado.omitidos++;
+      continue;
+    }
+
+    const vacData = {
+      name:       fullName,
+      role:       user.position || '',
+      area:       areaCode,
+      avatar:     AVATARS[i % AVATARS.length],
+      ingreso:    user.createdAt || new Date(),
+      userId:     user._id,
+      active:     true,
+      saldoTotal: 30,
+    };
+
+    const existente = existenteMap[user._id.toString()];
+
+    if (!existente) {
+      if (!dryRun) await VacEmpleado.create(vacData);
+      resultado.creados++;
+    } else if (modo === 'upsert') {
+      if (!dryRun) {
+        await VacEmpleado.findByIdAndUpdate(existente._id, {
+          $set: { name: vacData.name, role: vacData.role, area: vacData.area },
+        });
+      }
+      resultado.actualizados++;
+    } else {
+      resultado.omitidos++;
+    }
+  }
+
+  return resultado;
 }
 
 const syncFromUsers = async (req, res) => {
   try {
-    const dryRun  = req.query.dryRun === 'true';
-    const modo    = req.query.modo ?? 'upsert'; // 'upsert' | 'solo-nuevos'
-
-    // Traer todos los usuarios activos con sus áreas populadas
-    const users = await User.find({ active: true })
-      .populate('areas', 'name shortName')
-      .lean();
-
-    if (users.length === 0) {
-      return sendSuccess(res, { message: 'No hay usuarios activos en el sistema', creados: 0, actualizados: 0, sinArea: [] });
-    }
-
-    // Mapa userId → VacEmpleado existente
-    const existentes = await VacEmpleado.find({
-      userId: { $in: users.map(u => u._id) },
-    }).lean();
-    const existenteMap = Object.fromEntries(existentes.map(e => [e.userId.toString(), e]));
-
-    const resultado = { creados: 0, actualizados: 0, omitidos: 0, sinArea: [], dryRun };
-
-    for (let i = 0; i < users.length; i++) {
-      const user = users[i];
-      const fullName = [user.name, user.lname].filter(Boolean).join(' ').trim();
-      if (!fullName) { resultado.omitidos++; continue; }
-
-      // Detectar área
-      const areaObj = user.areas?.[0]; // tomar la primera área asignada
-      const areaCode = areaObj ? mapAreaName(areaObj.name) : null;
-      if (!areaCode) {
-        resultado.sinArea.push({
-          userId: user._id,
-          nombre: fullName,
-          areaName: areaObj?.name ?? '(sin área asignada)',
-        });
-        // Si no se puede mapear el área, no se puede crear VacEmpleado (campo requerido)
-        resultado.omitidos++;
-        continue;
-      }
-
-      const vacData = {
-        name:       fullName,
-        role:       user.position || '',
-        area:       areaCode,
-        avatar:     AVATARS[i % AVATARS.length],
-        ingreso:    user.createdAt || new Date(),
-        userId:     user._id,
-        active:     user.active,
-        saldoTotal: 30,
-      };
-
-      const existente = existenteMap[user._id.toString()];
-
-      if (!existente) {
-        if (!dryRun) await VacEmpleado.create(vacData);
-        resultado.creados++;
-      } else if (modo === 'upsert') {
-        if (!dryRun) {
-          await VacEmpleado.findByIdAndUpdate(existente._id, {
-            $set: { name: vacData.name, role: vacData.role, area: vacData.area, active: vacData.active },
-          });
-        }
-        resultado.actualizados++;
-      } else {
-        resultado.omitidos++;
-      }
-    }
-
-    return sendSuccess(res, resultado);
+    const dryRun = req.query.dryRun === 'true';
+    const modo   = req.query.modo ?? 'upsert';
+    const result = await _doSyncFromUsers({ dryRun, modo });
+    return sendSuccess(res, { ...result, dryRun });
   } catch (err) {
     return sendError(res, err.message);
   }
@@ -697,6 +776,9 @@ module.exports = {
   getCalendario,
   getReportes,
   getFeriados,
+  // Políticas
+  getPoliticas,
+  updatePoliticas,
   // Dev
   seedData,
   syncFromUsers,
