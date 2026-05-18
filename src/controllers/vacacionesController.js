@@ -1,4 +1,3 @@
-const VacEmpleado = require('../models/VacEmpleado');
 const VacSolicitud = require('../models/VacSolicitud');
 const VacPolitica = require('../models/VacPolitica');
 const VacFeriado = require('../models/VacFeriado');
@@ -9,14 +8,13 @@ const { sendSuccess, sendError } = require('../helpers/responseHelper');
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TIPOS_CONFIG = {
-  'vacaciones': { descuenta: true, gozaSueldo: true },
-  'permiso-goce': { descuenta: false, gozaSueldo: true },
+  'vacaciones':      { descuenta: true,  gozaSueldo: true  },
+  'permiso-goce':    { descuenta: false, gozaSueldo: true  },
   'permiso-singoce': { descuenta: false, gozaSueldo: false },
-  'medica': { descuenta: false, gozaSueldo: true },
-  'cumple': { descuenta: false, gozaSueldo: true },
+  'medica':          { descuenta: false, gozaSueldo: true  },
+  'cumple':          { descuenta: false, gozaSueldo: true  },
 };
 
-// Datos semilla para poblar la BD en el primer arranque
 const FERIADOS_SEED = {
   '2025-01-01': 'Año Nuevo',
   '2025-04-17': 'Jueves Santo',
@@ -47,18 +45,16 @@ const FERIADOS_SEED = {
   '2026-12-25': 'Navidad',
 };
 
-// Colores por defecto según el código de área (se aplican si Area.color no ha sido personalizado)
 const DEFAULT_AREA_COLORS = {
-  td: '#2563eb',
-  ops: '#0a9d6f',
+  td:    '#2563eb',
+  ops:   '#0a9d6f',
   comer: '#ea8035',
-  fin: '#8a4ad1',
-  rrhh: '#d65a96',
+  fin:   '#8a4ad1',
+  rrhh:  '#d65a96',
 };
 
 // ─── Caches ───────────────────────────────────────────────────────────────────
 
-let _lastUserSyncAt = 0;     // timestamp del último sync User→VacEmpleado
 let _feriadosCache = null;
 const invalidateFeriadosCache = () => { _feriadosCache = null; };
 
@@ -69,7 +65,7 @@ async function getFeriadosSet() {
     const toInsert = Object.entries(FERIADOS_SEED).map(([iso, nombre]) => ({
       iso, nombre, year: parseInt(iso.substring(0, 4)),
     }));
-    await VacFeriado.insertMany(toInsert, { ordered: false }).catch(() => { });
+    await VacFeriado.insertMany(toInsert, { ordered: false }).catch(() => {});
     docs = await VacFeriado.find().lean();
   }
   _feriadosCache = new Set(docs.map(d => d.iso));
@@ -87,7 +83,7 @@ function toIsoDate(d) {
 async function countWorkdays(desde, hasta) {
   const feriados = await getFeriadosSet();
   const start = new Date(desde + 'T12:00:00');
-  const end = new Date(hasta + 'T12:00:00');
+  const end   = new Date(hasta + 'T12:00:00');
   let count = 0;
   const cur = new Date(start);
   while (cur <= end) {
@@ -98,21 +94,40 @@ async function countWorkdays(desde, hasta) {
   return count;
 }
 
-function formatEmpleado(doc) {
-  if (!doc) return null;
-  const obj = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+// mapAreaName solo se usa para elegir colores por defecto; NO determina el código de área.
+function mapAreaName(name = '') {
+  const n = name.toLowerCase();
+  if (/digital|tecnolog|sistem|software|\bti\b|\btd\b/.test(n)) return 'td';
+  if (/comer|venta|sales|marketing|negoc/.test(n))              return 'comer';
+  if (/financ|contab|admin|tesor|contad/.test(n))               return 'fin';
+  if (/recurso|rrhh|human|people|talent|personal/.test(n))      return 'rrhh';
+  if (/oper|logist|distribuci|almac/.test(n))                   return 'ops';
+  return null;
+}
+
+// El código de área es shortName (si existe) o el _id del documento — siempre único.
+function areaDocToCode(areaDoc) {
+  if (areaDoc.shortName) return areaDoc.shortName.toLowerCase();
+  return areaDoc._id.toString();
+}
+
+function formatEmpleado(userDoc) {
+  const obj = typeof userDoc.toObject === 'function' ? userDoc.toObject() : userDoc;
+  const fullName = [obj.name, obj.lname].filter(Boolean).join(' ').trim();
+  const areaDoc  = obj.areas?.[0];
+  const areaCode = areaDoc ? areaDocToCode(areaDoc) : null;
   return {
-    id: obj._id.toString(),
-    name: obj.name,
-    role: obj.role || '',
-    area: obj.area,
-    lead: obj.leadId ? obj.leadId.toString() : null,
-    avatar: obj.avatar || 'var(--av-blue)',
-    ingreso: obj.ingreso instanceof Date ? toIsoDate(obj.ingreso) : obj.ingreso,
-    saldoTotal: obj.saldoTotal,
-    tomados: obj.tomados,
-    pendientes: obj.pendientes,
-    userId: obj.userId ? obj.userId.toString() : null,
+    id:         obj._id.toString(),
+    name:       fullName,
+    role:       obj.position || '',
+    area:       areaCode,
+    lead:       obj.vacLeadId ? obj.vacLeadId.toString() : null,
+    avatar:     obj.photo || 'var(--av-blue)',
+    ingreso:    obj.ingreso instanceof Date ? toIsoDate(obj.ingreso) : (obj.ingreso || null),
+    saldoTotal: obj.vacSaldoTotal ?? 30,
+    tomados:    obj.vacTomados    ?? 0,
+    pendientes: obj.vacPendientes ?? 0,
+    userId:     obj._id.toString(),
   };
 }
 
@@ -120,54 +135,43 @@ function formatSolicitud(doc) {
   if (!doc) return null;
   const obj = typeof doc.toObject === 'function' ? doc.toObject() : doc;
   const result = {
-    id: obj._id.toString(),
-    empId: obj.empId ? obj.empId.toString() : null,
-    tipo: obj.tipo,
-    desde: obj.desde,
-    hasta: obj.hasta,
-    dias: obj.dias,
-    medioDia: obj.medioDia || false,
-    estado: obj.estado,
-    motivo: obj.motivo,
-    solicitada: obj.solicitada instanceof Date ? toIsoDate(obj.solicitada) : obj.solicitada,
-    aprobador: obj.aprobadorId ? obj.aprobadorId.toString() : null,
-    responsableId: obj.responsableId ? obj.responsableId.toString() : null,
-    nivel: obj.nivel,
+    id:           obj._id.toString(),
+    empId:        obj.empId        ? obj.empId.toString()        : null,
+    tipo:         obj.tipo,
+    desde:        obj.desde,
+    hasta:        obj.hasta,
+    dias:         obj.dias,
+    medioDia:     obj.medioDia || false,
+    estado:       obj.estado,
+    motivo:       obj.motivo,
+    solicitada:   obj.solicitada instanceof Date ? toIsoDate(obj.solicitada) : obj.solicitada,
+    aprobador:    obj.aprobadorId   ? obj.aprobadorId.toString()   : null,
+    responsableId:obj.responsableId ? obj.responsableId.toString() : null,
+    nivel:        obj.nivel,
   };
-  if (obj.aprobada) {
-    result.aprobada = obj.aprobada instanceof Date ? toIsoDate(obj.aprobada) : obj.aprobada;
-  }
-  if (obj.motivoRechazo) {
-    result.motivoRechazo = obj.motivoRechazo;
-  }
+  if (obj.aprobada)      result.aprobada      = obj.aprobada instanceof Date ? toIsoDate(obj.aprobada) : obj.aprobada;
+  if (obj.motivoRechazo) result.motivoRechazo = obj.motivoRechazo;
   return result;
 }
 
 // ─── Áreas ────────────────────────────────────────────────────────────────────
 
-// Derivar el código corto de área desde el doc de Area
-// Usa shortName si está definido, si no aplica el mismo mapeo regex de mapAreaName
-function areaDocToCode(areaDoc) {
-  if (areaDoc.shortName) return areaDoc.shortName.toLowerCase();
-  return mapAreaName(areaDoc.name) || null;
-}
-
 const getAreas = async (_req, res) => {
   try {
     const docs = await Area.find({ status: 'active' }).sort({ name: 1 }).lean();
-    const seen = new Set();
+    const seen  = new Set();
     const areas = docs
       .map(a => {
         const code = areaDocToCode(a);
-        if (!code) return null;
+        const colorKey = a.shortName?.toLowerCase() || mapAreaName(a.name);
         return {
-          id: code,
+          id:    code,
           label: a.name,
-          // Usa el color almacenado si fue personalizado, si no aplica el default por código
-          color: (a.color && a.color !== '#6b7280') ? a.color : (DEFAULT_AREA_COLORS[code] || '#6b7280'),
+          color: (a.color && a.color !== '#6b7280')
+            ? a.color
+            : (DEFAULT_AREA_COLORS[colorKey] || '#6b7280'),
         };
       })
-      .filter(Boolean)
       .filter(a => {
         if (seen.has(a.id)) return false;
         seen.add(a.id);
@@ -179,35 +183,27 @@ const getAreas = async (_req, res) => {
   }
 };
 
-// ─── Empleados ────────────────────────────────────────────────────────────────
+// ─── Empleados (ahora leen directo de User) ───────────────────────────────────
 
 const getEmpleados = async (req, res) => {
   try {
-    const { area, search, active = 'true' } = req.query;
+    const { search, active = 'true' } = req.query;
     const filter = {};
     if (active !== 'all') filter.active = active === 'true';
-    if (area) filter.area = area;
     if (search) {
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { role: { $regex: search, $options: 'i' } },
+        { name:     { $regex: search, $options: 'i' } },
+        { lname:    { $regex: search, $options: 'i' } },
+        { position: { $regex: search, $options: 'i' } },
       ];
     }
 
-    // Sync new users from User collection (at most once per 60s)
-    if (Date.now() - _lastUserSyncAt > 60_000) {
-      await _doSyncFromUsers({ dryRun: false, modo: 'solo-nuevos' });
-      _lastUserSyncAt = Date.now();
-    }
+    const users = await User.find(filter)
+      .populate('areas', 'name shortName')
+      .sort({ name: 1, lname: 1 })
+      .lean();
 
-    const docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
-
-    // Si existen empleados vinculados a usuarios reales, excluir los del seed (sin userId).
-    // Esto evita que datos hardcodeados del seed aparezcan mezclados con empleados reales.
-    const hasLinked = docs.some(e => e.userId);
-    const result = hasLinked ? docs.filter(e => e.userId) : docs;
-
-    return sendSuccess(res, result.map(formatEmpleado));
+    return sendSuccess(res, users.map(formatEmpleado));
   } catch (err) {
     return sendError(res, err.message);
   }
@@ -215,65 +211,32 @@ const getEmpleados = async (req, res) => {
 
 const getEmpleadoById = async (req, res) => {
   try {
-    const doc = await VacEmpleado.findById(req.params.id).lean();
-    if (!doc) return sendError(res, 'Empleado no encontrado', 404);
-    return sendSuccess(res, formatEmpleado(doc));
+    const user = await User.findById(req.params.id)
+      .populate('areas', 'name shortName')
+      .lean();
+    if (!user) return sendError(res, 'Usuario no encontrado', 404);
+    return sendSuccess(res, formatEmpleado(user));
   } catch (err) {
     return sendError(res, err.message);
   }
 };
 
-const createEmpleado = async (req, res) => {
-  try {
-    const { name, role, area, leadId, avatar, ingreso, saldoTotal } = req.body;
-    if (!name || !area || !ingreso) {
-      return sendError(res, 'name, area e ingreso son requeridos', 400);
-    }
-
-    const areaDocs = await Area.find({ status: 'active' }).lean();
-    const validCodes = areaDocs.map(areaDocToCode).filter(Boolean);
-    if (!validCodes.includes(area)) {
-      return sendError(res, `Área inválida. Valores: ${validCodes.join(', ')}`, 400);
-    }
-
-    if (leadId) {
-      const lead = await VacEmpleado.findById(leadId);
-      if (!lead) return sendError(res, 'Líder no encontrado', 404);
-    }
-    const doc = await VacEmpleado.create({
-      name, role, area, leadId: leadId || null, avatar, ingreso,
-      saldoTotal: saldoTotal ?? 30,
-    });
-    return sendSuccess(res, formatEmpleado(doc), 201);
-  } catch (err) {
-    if (err.name === 'ValidationError') {
-      return sendError(res, Object.values(err.errors).map(e => e.message).join(', '), 400);
-    }
-    return sendError(res, err.message);
-  }
-};
-
+// Solo permite actualizar campos de vacaciones del usuario (saldo y líder).
 const updateEmpleado = async (req, res) => {
   try {
-    const allowed = ['name', 'role', 'area', 'leadId', 'avatar', 'ingreso', 'saldoTotal', 'active'];
-    const update = {};
+    const allowed = ['vacSaldoTotal', 'vacLeadId'];
+    const update  = {};
     for (const key of allowed) {
       if (req.body[key] !== undefined) update[key] = req.body[key];
     }
-    if (update.area) {
-      const areaDocs = await Area.find({ status: 'active' }).lean();
-      const validCodes = areaDocs.map(areaDocToCode).filter(Boolean);
-      if (!validCodes.includes(update.area)) {
-        return sendError(res, `Área inválida: ${update.area}`, 400);
-      }
+    if (Object.keys(update).length === 0) {
+      return sendError(res, 'No hay campos válidos para actualizar', 400);
     }
-    const doc = await VacEmpleado.findByIdAndUpdate(
-      req.params.id,
-      { $set: update },
-      { new: true, runValidators: true }
-    ).lean();
-    if (!doc) return sendError(res, 'Empleado no encontrado', 404);
-    return sendSuccess(res, formatEmpleado(doc));
+    const user = await User.findByIdAndUpdate(req.params.id, { $set: update }, { new: true })
+      .populate('areas', 'name shortName')
+      .lean();
+    if (!user) return sendError(res, 'Usuario no encontrado', 404);
+    return sendSuccess(res, formatEmpleado(user));
   } catch (err) {
     return sendError(res, err.message);
   }
@@ -297,10 +260,10 @@ const getSolicitudes = async (req, res) => {
     const { estado, empId, tipo, desde, hasta } = req.query;
     const filter = {};
     if (estado) filter.estado = estado;
-    if (empId) filter.empId = empId;
-    if (tipo) filter.tipo = tipo;
-    if (desde) filter.desde = { $gte: desde };
-    if (hasta) filter.hasta = { $lte: hasta };
+    if (empId)  filter.empId  = empId;
+    if (tipo)   filter.tipo   = tipo;
+    if (desde)  filter.desde  = { $gte: desde };
+    if (hasta)  filter.hasta  = { $lte: hasta };
     const docs = await VacSolicitud.find(filter).sort({ solicitada: -1 }).lean();
     return sendSuccess(res, docs.map(formatSolicitud));
   } catch (err) {
@@ -335,15 +298,15 @@ const createSolicitud = async (req, res) => {
       return sendError(res, 'Para medio día, la fecha de inicio y fin deben ser el mismo día', 400);
     }
 
-    const emp = await VacEmpleado.findById(empId);
+    const emp = await User.findById(empId);
     if (!emp || !emp.active) {
-      return sendError(res, 'Empleado no encontrado o inactivo', 404);
+      return sendError(res, 'Usuario no encontrado o inactivo', 404);
     }
 
     if (!emp.ingreso || isNaN(new Date(emp.ingreso).getTime())) {
       return sendError(
         res,
-        'El empleado no tiene fecha de ingreso registrada. Completa su perfil antes de crear una solicitud.',
+        'El usuario no tiene fecha de ingreso registrada. Completa su perfil antes de crear una solicitud.',
         400
       );
     }
@@ -351,40 +314,35 @@ const createSolicitud = async (req, res) => {
     let dias;
     if (medioDia) {
       const workdays = await countWorkdays(desde, hasta);
-      if (workdays < 1) {
-        return sendError(res, 'El día seleccionado no es un día hábil', 400);
-      }
+      if (workdays < 1) return sendError(res, 'El día seleccionado no es un día hábil', 400);
       dias = 0.5;
     } else {
       dias = await countWorkdays(desde, hasta);
-      if (dias < 1) {
-        return sendError(res, 'El rango de fechas no contiene días hábiles', 400);
-      }
+      if (dias < 1) return sendError(res, 'El rango de fechas no contiene días hábiles', 400);
     }
 
-    // Validar responsable si se especificó
     if (responsableId) {
-      const responsable = await VacEmpleado.findById(responsableId);
+      const responsable = await User.findById(responsableId);
       if (!responsable || !responsable.active) {
         return sendError(res, 'Responsable no encontrado o inactivo', 404);
       }
     }
 
-    // El saldo solo se gana luego de cumplir 1 año. Si el empleado
-    // no ha completado su primer aniversario su balance efectivo es 0,
-    // pero igual se permite la solicitud (queda en negativo).
     if (TIPOS_CONFIG[tipo].descuenta) {
-      const hoy = new Date();
+      const hoy          = new Date();
       const aniosServicio = (hoy - new Date(emp.ingreso)) / (1000 * 60 * 60 * 24 * 365.25);
-      const saldoGanado = aniosServicio >= 1 ? emp.saldoTotal : 0;
-      const disponible  = saldoGanado - emp.tomados - emp.pendientes;
+      const saldoTotal    = emp.vacSaldoTotal ?? 30;
+      const tomados       = emp.vacTomados    ?? 0;
+      const pendientes    = emp.vacPendientes ?? 0;
+      const saldoGanado   = aniosServicio >= 1 ? saldoTotal : 0;
+      const disponible    = saldoGanado - tomados - pendientes;
 
       if (aniosServicio < 1) {
-        if (emp.tomados + emp.pendientes + dias > emp.saldoTotal) {
-          const maxAdelanto = Math.max(0, emp.saldoTotal - emp.tomados - emp.pendientes);
+        if (tomados + pendientes + dias > saldoTotal) {
+          const maxAdelanto = Math.max(0, saldoTotal - tomados - pendientes);
           return sendError(
             res,
-            `Adelanto máximo alcanzado. Límite: ${emp.saldoTotal}d — Adelanto disponible: ${maxAdelanto}d`,
+            `Adelanto máximo alcanzado. Límite: ${saldoTotal}d — Adelanto disponible: ${maxAdelanto}d`,
             400
           );
         }
@@ -400,8 +358,8 @@ const createSolicitud = async (req, res) => {
     const overlap = await VacSolicitud.findOne({
       empId,
       estado: { $in: ['pendiente', 'aprobado'] },
-      desde: { $lte: hasta },
-      hasta: { $gte: desde },
+      desde:  { $lte: hasta },
+      hasta:  { $gte: desde },
     });
     if (overlap) {
       return sendError(
@@ -411,576 +369,530 @@ const createSolicitud = async (req, res) => {
       );
     }
 
-    // Si se especificó un responsable, él es el aprobador
-    let aprobadorId = responsableId ? responsableId : (emp.leadId || null);
-    let nivel = dias > 5 ? 'rrhh' : 'lider';
+    let aprobadorId = responsableId ? responsableId : (emp.vacLeadId || null);
+    let nivel       = dias > 5 ? 'rrhh' : 'lider';
 
     if (!aprobadorId) {
-      const rrhhLead = await VacEmpleado.findOne({ area: 'rrhh', leadId: null, active: true });
-      aprobadorId = rrhhLead ? rrhhLead._id : null;
+      // Buscar el lead de RRHH entre los usuarios activos
+      const rrhhAreas = await Area.find({
+        $or: [
+          { shortName: /^rrhh$/i },
+          { name: /recurso|rrhh|human|people|talent|personal/i },
+        ],
+        status: 'active',
+      }).lean();
+      if (rrhhAreas.length > 0) {
+        const rrhhLead = await User.findOne({
+          areas:      { $in: rrhhAreas.map(a => a._id) },
+          vacLeadId:  null,
+          active:     true,
+        });
+        aprobadorId = rrhhLead ? rrhhLead._id : null;
+      }
       nivel = 'rrhh';
     }
 
     if (responsableId) nivel = 'lider';
 
     const solicitud = await VacSolicitud.create({
-      empId, tipo, desde, hasta, dias, medioDia: medioDia || false, motivo,
+      empId, tipo, desde, hasta: medioDia ? desde : hasta,
+      dias, medioDia: medioDia || false, motivo,
       aprobadorId, responsableId: responsableId || null,
       nivel, estado: 'pendiente', solicitada: new Date(),
     });
 
     if (TIPOS_CONFIG[tipo].descuenta) {
-      await VacEmpleado.findByIdAndUpdate(empId, { $inc: { pendientes: dias } });
+      await User.findByIdAndUpdate(empId, { $inc: { vacPendientes: dias } });
     }
 
     return sendSuccess(res, formatSolicitud(solicitud), 201);
   } catch (err) {
-      if (err.name === 'ValidationError') {
-        return sendError(res, Object.values(err.errors).map(e => e.message).join(', '), 400);
-      }
-      return sendError(res, err.message);
+    if (err.name === 'ValidationError') {
+      return sendError(res, Object.values(err.errors).map(e => e.message).join(', '), 400);
     }
-  };
+    return sendError(res, err.message);
+  }
+};
 
-  const aprobarSolicitud = async (req, res) => {
-    try {
-      const solicitud = await VacSolicitud.findById(req.params.id);
-      if (!solicitud) return sendError(res, 'Solicitud no encontrada', 404);
-      if (solicitud.estado !== 'pendiente') {
-        return sendError(res, `La solicitud ya fue ${solicitud.estado}`, 409);
-      }
-
-      // Si la solicitud tiene responsable designado, solo ese empleado puede aprobar
-      if (solicitud.responsableId) {
-        const pasadoId = req.body.aprobadorId ? req.body.aprobadorId.toString() : null;
-        if (pasadoId && pasadoId !== solicitud.responsableId.toString()) {
-          return sendError(res, 'Solo el responsable designado puede aprobar esta solicitud', 403);
-        }
-        // Si no se pasa aprobadorId, usar el responsable designado
-        solicitud.aprobadorId = solicitud.responsableId;
-      } else if (req.body.aprobadorId) {
-        solicitud.aprobadorId = req.body.aprobadorId;
-      }
-
-      solicitud.estado = 'aprobado';
-      solicitud.aprobada = new Date();
-      await solicitud.save();
-
-      if (TIPOS_CONFIG[solicitud.tipo]?.descuenta) {
-        await VacEmpleado.findByIdAndUpdate(solicitud.empId, {
-          $inc: { tomados: solicitud.dias, pendientes: -solicitud.dias },
-        });
-      }
-
-      return sendSuccess(res, formatSolicitud(solicitud));
-    } catch (err) {
-      return sendError(res, err.message);
+const aprobarSolicitud = async (req, res) => {
+  try {
+    const solicitud = await VacSolicitud.findById(req.params.id);
+    if (!solicitud) return sendError(res, 'Solicitud no encontrada', 404);
+    if (solicitud.estado !== 'pendiente') {
+      return sendError(res, `La solicitud ya fue ${solicitud.estado}`, 409);
     }
-  };
 
-  const deleteSolicitud = async (req, res) => {
-    try {
-      const solicitud = await VacSolicitud.findById(req.params.id);
-      if (!solicitud) return sendError(res, 'Solicitud no encontrada', 404);
-
-      // Revertir saldo si corresponde
-      if (TIPOS_CONFIG[solicitud.tipo]?.descuenta) {
-        if (solicitud.estado === 'pendiente') {
-          await VacEmpleado.findByIdAndUpdate(solicitud.empId, { $inc: { pendientes: -solicitud.dias } });
-        } else if (solicitud.estado === 'aprobado') {
-          await VacEmpleado.findByIdAndUpdate(solicitud.empId, { $inc: { tomados: -solicitud.dias } });
-        }
+    if (solicitud.responsableId) {
+      const pasadoId = req.body.aprobadorId ? req.body.aprobadorId.toString() : null;
+      if (pasadoId && pasadoId !== solicitud.responsableId.toString()) {
+        return sendError(res, 'Solo el responsable designado puede aprobar esta solicitud', 403);
       }
-
-      await VacSolicitud.findByIdAndDelete(req.params.id);
-      return sendSuccess(res, { deleted: req.params.id });
-    } catch (err) {
-      return sendError(res, err.message);
+      solicitud.aprobadorId = solicitud.responsableId;
+    } else if (req.body.aprobadorId) {
+      solicitud.aprobadorId = req.body.aprobadorId;
     }
-  };
 
-  const rechazarSolicitud = async (req, res) => {
-    try {
-      const { motivo } = req.body;
-      if (!motivo || !motivo.trim()) {
-        return sendError(res, 'El motivo de rechazo es requerido', 400);
-      }
+    solicitud.estado  = 'aprobado';
+    solicitud.aprobada = new Date();
+    await solicitud.save();
 
-      const solicitud = await VacSolicitud.findById(req.params.id);
-      if (!solicitud) return sendError(res, 'Solicitud no encontrada', 404);
-      if (solicitud.estado !== 'pendiente') {
-        return sendError(res, `La solicitud ya fue ${solicitud.estado}`, 409);
-      }
-
-      solicitud.estado = 'rechazado';
-      solicitud.motivoRechazo = motivo.trim();
-      await solicitud.save();
-
-      if (TIPOS_CONFIG[solicitud.tipo]?.descuenta) {
-        await VacEmpleado.findByIdAndUpdate(solicitud.empId, {
-          $inc: { pendientes: -solicitud.dias },
-        });
-      }
-
-      return sendSuccess(res, formatSolicitud(solicitud));
-    } catch (err) {
-      return sendError(res, err.message);
-    }
-  };
-
-  // ─── Dashboard ────────────────────────────────────────────────────────────────
-
-  const getDashboard = async (req, res) => {
-    try {
-      const [empleados, solicitudes] = await Promise.all([
-        VacEmpleado.find({ active: true }).lean(),
-        VacSolicitud.find({}).sort({ solicitada: -1 }).lean(),
-      ]);
-
-      const pendientes = solicitudes.filter(s => s.estado === 'pendiente').length;
-      const aprobados = solicitudes.filter(s => s.estado === 'aprobado').length;
-      const rechazados = solicitudes.filter(s => s.estado === 'rechazado').length;
-
-      const today = toIsoDate(new Date());
-      const mesActual = today.substring(0, 7);
-
-      const diasEsteMes = solicitudes
-        .filter(s => s.estado === 'aprobado' && s.desde.startsWith(mesActual))
-        .reduce((acc, s) => acc + s.dias, 0);
-
-      const totalDisponibles = empleados.reduce(
-        (acc, e) => acc + Math.max(0, e.saldoTotal - e.tomados - e.pendientes),
-        0
-      );
-
-      const ausenciasHoy = solicitudes
-        .filter(s => s.estado === 'aprobado' && s.desde <= today && s.hasta >= today)
-        .map(formatSolicitud);
-
-      const recientes = solicitudes.slice(0, 8).map(formatSolicitud);
-
-      const bajosaldo = empleados
-        .map(e => ({
-          ...formatEmpleado(e),
-          disponible: Math.max(0, e.saldoTotal - e.tomados - e.pendientes),
-        }))
-        .sort((a, b) => a.disponible - b.disponible)
-        .slice(0, 5);
-
-      return sendSuccess(res, {
-        totalEmpleados: empleados.length,
-        pendientes, aprobados, rechazados,
-        diasEsteMes, totalDisponibles,
-        ausenciasHoy, recientes, bajosaldo,
+    if (TIPOS_CONFIG[solicitud.tipo]?.descuenta) {
+      await User.findByIdAndUpdate(solicitud.empId, {
+        $inc: { vacTomados: solicitud.dias, vacPendientes: -solicitud.dias },
       });
-    } catch (err) {
-      return sendError(res, err.message);
     }
-  };
 
-  // ─── Calendario ───────────────────────────────────────────────────────────────
-
-  const getCalendario = async (req, res) => {
-    try {
-      const now = new Date();
-      const y = parseInt(req.query.year) || now.getFullYear();
-      const m = parseInt(req.query.month) || now.getMonth() + 1;
-      const desde = `${y}-${pad2(m)}-01`;
-      const lastD = new Date(y, m, 0).getDate();
-      const hasta = `${y}-${pad2(m)}-${pad2(lastD)}`;
-
-      const docs = await VacSolicitud.find({
-        estado: { $in: ['pendiente', 'aprobado'] },
-        desde: { $lte: hasta },
-        hasta: { $gte: desde },
-      }).lean();
-
-      return sendSuccess(res, docs.map(formatSolicitud));
-    } catch (err) {
-      return sendError(res, err.message);
-    }
-  };
-
-  // ─── Reportes ─────────────────────────────────────────────────────────────────
-
-  const getReportes = async (req, res) => {
-    try {
-      const [empleados, solicitudes] = await Promise.all([
-        VacEmpleado.find({ active: true }).lean(),
-        VacSolicitud.find({}).lean(),
-      ]);
-
-      const porTipo = {};
-      for (const s of solicitudes) {
-        if (!porTipo[s.tipo]) porTipo[s.tipo] = { count: 0, dias: 0 };
-        porTipo[s.tipo].count++;
-        porTipo[s.tipo].dias += s.dias;
-      }
-
-      const empMap = Object.fromEntries(empleados.map(e => [e._id.toString(), e]));
-      const porArea = {};
-      for (const s of solicitudes) {
-        const emp = empMap[s.empId.toString()];
-        const area = emp?.area || 'desconocido';
-        if (!porArea[area]) porArea[area] = { count: 0, dias: 0 };
-        porArea[area].count++;
-        porArea[area].dias += s.dias;
-      }
-
-      const porMes = {};
-      for (const s of solicitudes.filter(s => s.estado === 'aprobado')) {
-        const mes = s.desde.substring(0, 7);
-        if (!porMes[mes]) porMes[mes] = { count: 0, dias: 0 };
-        porMes[mes].count++;
-        porMes[mes].dias += s.dias;
-      }
-
-      const balanceSummary = empleados.map(e => ({
-        ...formatEmpleado(e),
-        disponible: Math.max(0, e.saldoTotal - e.tomados - e.pendientes),
-      }));
-
-      return sendSuccess(res, { porTipo, porArea, porMes, balanceSummary });
-    } catch (err) {
-      return sendError(res, err.message);
-    }
-  };
-
-  // ─── Políticas ────────────────────────────────────────────────────────────────
-
-  const DEFAULT_POLITICA = {
-    diasBase: 30,
-    periodo: 'aniversario',
-    anticipacion: 15,
-    maxBloque: 15,
-    adelantar: true,
-    doblePaso: true,
-    autoAprobar: false,
-    notifEmail: true,
-    notifSlack: true,
-    tiposHabilitados: [
-      { id: 'vacaciones', enabled: true },
-      { id: 'permiso-goce', enabled: true },
-      { id: 'permiso-singoce', enabled: true },
-      { id: 'medica', enabled: true },
-      { id: 'cumple', enabled: true },
-    ],
-  };
-
-  function formatPolitica(doc) {
-    return {
-      diasBase: doc.diasBase,
-      periodo: doc.periodo,
-      anticipacion: doc.anticipacion,
-      maxBloque: doc.maxBloque,
-      adelantar: doc.adelantar,
-      doblePaso: doc.doblePaso,
-      autoAprobar: doc.autoAprobar,
-      notifEmail: doc.notifEmail,
-      notifSlack: doc.notifSlack,
-      tiposHabilitados: doc.tiposHabilitados,
-    };
+    return sendSuccess(res, formatSolicitud(solicitud));
+  } catch (err) {
+    return sendError(res, err.message);
   }
+};
 
-  const getPoliticas = async (_req, res) => {
-    try {
-      let doc = await VacPolitica.findOne().lean();
-      if (!doc) {
-        doc = (await VacPolitica.create(DEFAULT_POLITICA)).toObject();
+const deleteSolicitud = async (req, res) => {
+  try {
+    const solicitud = await VacSolicitud.findById(req.params.id);
+    if (!solicitud) return sendError(res, 'Solicitud no encontrada', 404);
+
+    if (TIPOS_CONFIG[solicitud.tipo]?.descuenta) {
+      if (solicitud.estado === 'pendiente') {
+        await User.findByIdAndUpdate(solicitud.empId, { $inc: { vacPendientes: -solicitud.dias } });
+      } else if (solicitud.estado === 'aprobado') {
+        await User.findByIdAndUpdate(solicitud.empId, { $inc: { vacTomados: -solicitud.dias } });
       }
-      return sendSuccess(res, formatPolitica(doc));
-    } catch (err) {
-      return sendError(res, err.message);
     }
-  };
 
-  const updatePoliticas = async (req, res) => {
-    try {
-      const allowed = [
-        'diasBase', 'periodo', 'anticipacion', 'maxBloque',
-        'adelantar', 'doblePaso', 'autoAprobar',
-        'notifEmail', 'notifSlack', 'tiposHabilitados',
-      ];
-      const update = {};
-      for (const key of allowed) {
-        if (req.body[key] !== undefined) update[key] = req.body[key];
-      }
-      const doc = await VacPolitica.findOneAndUpdate(
-        {},
-        { $set: update },
-        { new: true, upsert: true, runValidators: true }
-      ).lean();
-      return sendSuccess(res, formatPolitica(doc));
-    } catch (err) {
-      return sendError(res, err.message);
-    }
-  };
-
-  // ─── Feriados ─────────────────────────────────────────────────────────────────
-
-  const getFeriados = async (req, res) => {
-    try {
-      // Asegura que la semilla esté cargada en BD
-      await getFeriadosSet();
-      const filter = {};
-      if (req.query.year) filter.year = parseInt(req.query.year);
-      const docs = await VacFeriado.find(filter).sort({ iso: 1 }).lean();
-      return sendSuccess(res, Object.fromEntries(docs.map(d => [d.iso, d.nombre])));
-    } catch (err) {
-      return sendError(res, err.message);
-    }
-  };
-
-  const createFeriado = async (req, res) => {
-    try {
-      const { iso, nombre } = req.body;
-      if (!iso || !nombre) return sendError(res, 'iso y nombre son requeridos', 400);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-        return sendError(res, 'iso debe tener formato YYYY-MM-DD', 400);
-      }
-      const year = parseInt(iso.substring(0, 4));
-      const doc = await VacFeriado.create({ iso, nombre: nombre.trim(), year });
-      invalidateFeriadosCache();
-      return sendSuccess(res, { iso: doc.iso, nombre: doc.nombre }, 201);
-    } catch (err) {
-      if (err.code === 11000) return sendError(res, 'Ya existe un feriado con esa fecha', 409);
-      return sendError(res, err.message);
-    }
-  };
-
-  const deleteFeriado = async (req, res) => {
-    try {
-      const { iso } = req.params;
-      const doc = await VacFeriado.findOneAndDelete({ iso });
-      if (!doc) return sendError(res, 'Feriado no encontrado', 404);
-      invalidateFeriadosCache();
-      return sendSuccess(res, { deleted: iso });
-    } catch (err) {
-      return sendError(res, err.message);
-    }
-  };
-
-  // ─── Seed ─────────────────────────────────────────────────────────────────────
-
-  const seedData = async (req, res) => {
-    try {
-      const force = req.query.force === 'true';
-      const count = await VacEmpleado.countDocuments();
-
-      if (count > 0 && !force) {
-        return sendError(
-          res,
-          `Ya existen ${count} empleados. Usa ?force=true para reinicializar.`,
-          409
-        );
-      }
-
-      if (force) {
-        await VacEmpleado.deleteMany({});
-        await VacSolicitud.deleteMany({});
-      }
-
-      // ── Fase 1: crear empleados sin leads ────────────────────────────────────
-      const raw = [
-        { _t: 'e1', name: 'Luis Taipe H.', role: 'Asistente de Soporte TD', area: 'td', _tl: 'e3', avatar: 'var(--av-blue)', ingreso: '2023-03-15', saldoTotal: 30, tomados: 12, pendientes: 2 },
-        { _t: 'e2', name: 'Victor Balboa M.', role: 'Desarrollador Backend', area: 'td', _tl: 'e3', avatar: 'var(--av-red)', ingreso: '2022-08-01', saldoTotal: 30, tomados: 20, pendientes: 0 },
-        { _t: 'e3', name: 'Luis Suarez R.', role: 'Líder de Transformación Digital', area: 'td', _tl: null, avatar: 'var(--av-green)', ingreso: '2020-01-12', saldoTotal: 30, tomados: 8, pendientes: 5 },
-        { _t: 'e4', name: 'Carlos Jesús Ordaz H.', role: 'Desarrollador Frontend', area: 'td', _tl: 'e3', avatar: 'var(--av-orange)', ingreso: '2024-05-10', saldoTotal: 30, tomados: 3, pendientes: 7 },
-        { _t: 'e5', name: 'María Quispe T.', role: 'Analista de Recursos Humanos', area: 'rrhh', _tl: 'e6', avatar: 'var(--av-pink)', ingreso: '2021-11-22', saldoTotal: 30, tomados: 18, pendientes: 0 },
-        { _t: 'e6', name: 'Patricia Núñez L.', role: 'Jefa de Recursos Humanos', area: 'rrhh', _tl: null, avatar: 'var(--av-purple)', ingreso: '2019-04-03', saldoTotal: 30, tomados: 24, pendientes: 0 },
-        { _t: 'e7', name: 'Diego Vargas C.', role: 'Coordinador de Operaciones', area: 'ops', _tl: 'e8', avatar: 'var(--av-teal)', ingreso: '2022-02-18', saldoTotal: 30, tomados: 10, pendientes: 0 },
-        { _t: 'e8', name: 'Ana Reyes M.', role: 'Gerente de Operaciones', area: 'ops', _tl: null, avatar: 'var(--av-amber)', ingreso: '2018-07-09', saldoTotal: 30, tomados: 6, pendientes: 0 },
-        { _t: 'e9', name: 'Sofía Mendoza P.', role: 'Asistente de Operaciones', area: 'ops', _tl: 'e7', avatar: 'var(--av-slate)', ingreso: '2023-09-01', saldoTotal: 30, tomados: 14, pendientes: 0 },
-        { _t: 'e10', name: 'Jorge Ramos S.', role: 'Ejecutivo Comercial', area: 'comer', _tl: 'e11', avatar: 'var(--av-blue)', ingreso: '2024-01-15', saldoTotal: 30, tomados: 5, pendientes: 5 },
-        { _t: 'e11', name: 'Lucía Espinoza V.', role: 'Gerente Comercial', area: 'comer', _tl: null, avatar: 'var(--av-red)', ingreso: '2017-11-30', saldoTotal: 30, tomados: 28, pendientes: 0 },
-        { _t: 'e12', name: 'Renato Pérez A.', role: 'Analista de Finanzas', area: 'fin', _tl: 'e13', avatar: 'var(--av-green)', ingreso: '2022-06-20', saldoTotal: 30, tomados: 16, pendientes: 0 },
-        { _t: 'e13', name: 'Karen Salas D.', role: 'Contadora General', area: 'fin', _tl: null, avatar: 'var(--av-purple)', ingreso: '2019-09-15', saldoTotal: 30, tomados: 22, pendientes: 0 },
-      ];
-
-      const idMap = {};
-      for (const e of raw) {
-        const doc = await VacEmpleado.create({
-          name: e.name, role: e.role, area: e.area, avatar: e.avatar,
-          ingreso: new Date(e.ingreso),
-          saldoTotal: e.saldoTotal, tomados: e.tomados, pendientes: e.pendientes,
-        });
-        idMap[e._t] = doc._id;
-      }
-
-      // ── Fase 2: asignar leads ─────────────────────────────────────────────────
-      for (const e of raw) {
-        if (e._tl) {
-          await VacEmpleado.findByIdAndUpdate(idMap[e._t], { leadId: idMap[e._tl] });
-        }
-      }
-
-      // ── Fase 3: crear solicitudes ─────────────────────────────────────────────
-      const sols = [
-        { _te: 'e4', tipo: 'vacaciones', desde: '2026-05-18', hasta: '2026-05-22', dias: 5, estado: 'pendiente', motivo: 'Viaje familiar a Cusco.', solicitada: '2026-05-08', _ta: 'e3', nivel: 'lider' },
-        { _te: 'e1', tipo: 'vacaciones', desde: '2026-05-25', hasta: '2026-05-29', dias: 5, estado: 'pendiente', motivo: 'Vacaciones programadas.', solicitada: '2026-05-10', _ta: 'e3', nivel: 'lider' },
-        { _te: 'e3', tipo: 'vacaciones', desde: '2026-06-01', hasta: '2026-06-05', dias: 5, estado: 'pendiente', motivo: 'Descanso anual.', solicitada: '2026-05-11', _ta: 'e6', nivel: 'rrhh' },
-        { _te: 'e10', tipo: 'permiso-goce', desde: '2026-05-20', hasta: '2026-05-20', dias: 1, estado: 'pendiente', motivo: 'Trámite bancario personal.', solicitada: '2026-05-12', _ta: 'e11', nivel: 'lider' },
-        { _te: 'e4', tipo: 'permiso-singoce', desde: '2026-06-15', hasta: '2026-06-17', dias: 3, estado: 'pendiente', motivo: 'Curso de capacitación externo.', solicitada: '2026-05-13', _ta: 'e3', nivel: 'lider' },
-        { _te: 'e3', tipo: 'vacaciones', desde: '2026-05-04', hasta: '2026-05-08', dias: 5, estado: 'aprobado', motivo: 'Descanso anual.', solicitada: '2026-04-15', _ta: 'e6', aprobada: '2026-04-18' },
-        { _te: 'e9', tipo: 'medica', desde: '2026-05-11', hasta: '2026-05-13', dias: 3, estado: 'aprobado', motivo: 'Licencia médica con descanso por gripe.', solicitada: '2026-05-11', _ta: 'e6', aprobada: '2026-05-11' },
-        { _te: 'e7', tipo: 'vacaciones', desde: '2026-05-25', hasta: '2026-06-05', dias: 10, estado: 'aprobado', motivo: 'Viaje al extranjero.', solicitada: '2026-04-20', _ta: 'e8', aprobada: '2026-04-22' },
-        { _te: 'e2', tipo: 'vacaciones', desde: '2026-05-11', hasta: '2026-05-15', dias: 5, estado: 'aprobado', motivo: 'Vacaciones programadas.', solicitada: '2026-04-10', _ta: 'e3', aprobada: '2026-04-12' },
-        { _te: 'e12', tipo: 'cumple', desde: '2026-05-19', hasta: '2026-05-19', dias: 1, estado: 'aprobado', motivo: 'Día por cumpleaños.', solicitada: '2026-05-05', _ta: 'e13', aprobada: '2026-05-05' },
-        { _te: 'e5', tipo: 'vacaciones', desde: '2026-05-13', hasta: '2026-05-19', dias: 5, estado: 'aprobado', motivo: 'Vacaciones programadas.', solicitada: '2026-04-05', _ta: 'e6', aprobada: '2026-04-08' },
-        { _te: 'e1', tipo: 'permiso-goce', desde: '2026-04-22', hasta: '2026-04-22', dias: 1, estado: 'rechazado', motivo: 'Cita personal.', solicitada: '2026-04-20', _ta: 'e3', motivoRechazo: 'Cierre mensual coincide con esa fecha.' },
-      ];
-
-      for (const s of sols) {
-        await VacSolicitud.create({
-          empId: idMap[s._te],
-          tipo: s.tipo,
-          desde: s.desde,
-          hasta: s.hasta,
-          dias: s.dias,
-          estado: s.estado,
-          motivo: s.motivo,
-          solicitada: new Date(s.solicitada),
-          aprobadorId: s._ta ? idMap[s._ta] : null,
-          nivel: s.nivel || 'lider',
-          aprobada: s.aprobada ? new Date(s.aprobada) : null,
-          motivoRechazo: s.motivoRechazo || null,
-        });
-      }
-
-      return sendSuccess(res, {
-        message: 'Datos inicializados correctamente',
-        empleados: raw.length,
-        solicitudes: sols.length,
-      }, 201);
-    } catch (err) {
-      return sendError(res, err.message);
-    }
-  };
-
-  // ─── Sync desde Users ─────────────────────────────────────────────────────────
-
-  const AVATARS = [
-    'var(--av-blue)', 'var(--av-red)', 'var(--av-green)', 'var(--av-orange)',
-    'var(--av-purple)', 'var(--av-teal)', 'var(--av-pink)', 'var(--av-amber)',
-    'var(--av-slate)',
-  ];
-
-  function mapAreaName(name = '') {
-    const n = name.toLowerCase();
-    if (/digital|tecnolog|sistem|software|\bti\b|\btd\b/.test(n)) return 'td';
-    if (/comer|venta|sales|marketing|negoc/.test(n)) return 'comer';
-    if (/financ|contab|admin|tesor|contad/.test(n)) return 'fin';
-    if (/recurso|rrhh|human|people|talent|personal/.test(n)) return 'rrhh';
-    if (/oper|logist|distribuci|almac/.test(n)) return 'ops';
-    return null;
+    await VacSolicitud.findByIdAndDelete(req.params.id);
+    return sendSuccess(res, { deleted: req.params.id });
+  } catch (err) {
+    return sendError(res, err.message);
   }
+};
 
-  async function _doSyncFromUsers({ dryRun = false, modo = 'upsert' } = {}) {
-    const users = await User.find({ active: true })
-      .populate('areas', 'name shortName')
-      .lean();
+const rechazarSolicitud = async (req, res) => {
+  try {
+    const { motivo } = req.body;
+    if (!motivo || !motivo.trim()) {
+      return sendError(res, 'El motivo de rechazo es requerido', 400);
+    }
 
-    if (users.length === 0) return { creados: 0, actualizados: 0, omitidos: 0, sinArea: [] };
+    const solicitud = await VacSolicitud.findById(req.params.id);
+    if (!solicitud) return sendError(res, 'Solicitud no encontrada', 404);
+    if (solicitud.estado !== 'pendiente') {
+      return sendError(res, `La solicitud ya fue ${solicitud.estado}`, 409);
+    }
 
-    const existentes = await VacEmpleado.find({
-      userId: { $in: users.map(u => u._id) },
+    solicitud.estado        = 'rechazado';
+    solicitud.motivoRechazo = motivo.trim();
+    await solicitud.save();
+
+    if (TIPOS_CONFIG[solicitud.tipo]?.descuenta) {
+      await User.findByIdAndUpdate(solicitud.empId, { $inc: { vacPendientes: -solicitud.dias } });
+    }
+
+    return sendSuccess(res, formatSolicitud(solicitud));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+
+const getDashboard = async (req, res) => {
+  try {
+    const [users, solicitudes] = await Promise.all([
+      User.find({ active: true }).populate('areas', 'name shortName').lean(),
+      VacSolicitud.find({}).sort({ solicitada: -1 }).lean(),
+    ]);
+
+    const pendientes    = solicitudes.filter(s => s.estado === 'pendiente').length;
+    const aprobados     = solicitudes.filter(s => s.estado === 'aprobado').length;
+    const rechazados    = solicitudes.filter(s => s.estado === 'rechazado').length;
+
+    const today      = toIsoDate(new Date());
+    const mesActual  = today.substring(0, 7);
+
+    const diasEsteMes = solicitudes
+      .filter(s => s.estado === 'aprobado' && s.desde.startsWith(mesActual))
+      .reduce((acc, s) => acc + s.dias, 0);
+
+    const totalDisponibles = users.reduce((acc, u) => {
+      const saldo = (u.vacSaldoTotal ?? 30) - (u.vacTomados ?? 0) - (u.vacPendientes ?? 0);
+      return acc + Math.max(0, saldo);
+    }, 0);
+
+    const ausenciasHoy = solicitudes
+      .filter(s => s.estado === 'aprobado' && s.desde <= today && s.hasta >= today)
+      .map(formatSolicitud);
+
+    const recientes = solicitudes.slice(0, 8).map(formatSolicitud);
+
+    const bajosaldo = users
+      .map(u => ({
+        ...formatEmpleado(u),
+        disponible: Math.max(0, (u.vacSaldoTotal ?? 30) - (u.vacTomados ?? 0) - (u.vacPendientes ?? 0)),
+      }))
+      .sort((a, b) => a.disponible - b.disponible)
+      .slice(0, 5);
+
+    return sendSuccess(res, {
+      totalEmpleados: users.length,
+      pendientes, aprobados, rechazados,
+      diasEsteMes, totalDisponibles,
+      ausenciasHoy, recientes, bajosaldo,
+    });
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+// ─── Calendario ───────────────────────────────────────────────────────────────
+
+const getCalendario = async (req, res) => {
+  try {
+    const now   = new Date();
+    const y     = parseInt(req.query.year)  || now.getFullYear();
+    const m     = parseInt(req.query.month) || now.getMonth() + 1;
+    const desde = `${y}-${pad2(m)}-01`;
+    const lastD = new Date(y, m, 0).getDate();
+    const hasta = `${y}-${pad2(m)}-${pad2(lastD)}`;
+
+    const docs = await VacSolicitud.find({
+      estado: { $in: ['pendiente', 'aprobado'] },
+      desde:  { $lte: hasta },
+      hasta:  { $gte: desde },
     }).lean();
-    const existenteMap = Object.fromEntries(existentes.map(e => [e.userId.toString(), e]));
 
-    const resultado = { creados: 0, actualizados: 0, omitidos: 0, sinArea: [] };
+    return sendSuccess(res, docs.map(formatSolicitud));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
 
-    for (let i = 0; i < users.length; i++) {
-      const user = users[i];
-      const fullName = [user.name, user.lname].filter(Boolean).join(' ').trim();
-      if (!fullName) { resultado.omitidos++; continue; }
+// ─── Reportes ─────────────────────────────────────────────────────────────────
 
-      const areaObj = user.areas?.[0];
-      const areaCode = areaObj ? areaDocToCode(areaObj) : null;
+const getReportes = async (req, res) => {
+  try {
+    const [users, solicitudes] = await Promise.all([
+      User.find({ active: true }).populate('areas', 'name shortName').lean(),
+      VacSolicitud.find({}).lean(),
+    ]);
 
-      if (!areaCode) {
-        resultado.sinArea.push({
-          userId: user._id,
-          nombre: fullName,
-          areaName: areaObj?.name ?? '(sin área)',
-        });
-        resultado.omitidos++;
-        continue;
-      }
+    const porTipo = {};
+    for (const s of solicitudes) {
+      if (!porTipo[s.tipo]) porTipo[s.tipo] = { count: 0, dias: 0 };
+      porTipo[s.tipo].count++;
+      porTipo[s.tipo].dias += s.dias;
+    }
 
-      const vacData = {
-        name: fullName,
-        role: user.position || '',
-        area: areaCode,
-        avatar: AVATARS[i % AVATARS.length],
-        ingreso: user.ingreso || null,
-        userId: user._id,
-        active: true,
-        saldoTotal: 30,
-      };
+    const userMap = Object.fromEntries(users.map(u => [u._id.toString(), u]));
+    const porArea = {};
+    for (const s of solicitudes) {
+      const user    = userMap[s.empId?.toString()];
+      const areaDoc = user?.areas?.[0];
+      const area    = areaDoc ? (areaDoc.name || areaDocToCode(areaDoc)) : 'desconocido';
+      if (!porArea[area]) porArea[area] = { count: 0, dias: 0 };
+      porArea[area].count++;
+      porArea[area].dias += s.dias;
+    }
 
-      const existente = existenteMap[user._id.toString()];
+    const porMes = {};
+    for (const s of solicitudes.filter(s => s.estado === 'aprobado')) {
+      const mes = s.desde.substring(0, 7);
+      if (!porMes[mes]) porMes[mes] = { count: 0, dias: 0 };
+      porMes[mes].count++;
+      porMes[mes].dias += s.dias;
+    }
 
-      if (!existente) {
-        if (!dryRun) await VacEmpleado.create(vacData);
-        resultado.creados++;
-      } else if (modo === 'upsert') {
-        if (!dryRun) {
-          const updateFields = { name: vacData.name, role: vacData.role, area: vacData.area };
-          // Siempre sincronizar ingreso desde User cuando el User lo tiene registrado.
-          // User.ingreso es la fuente de verdad; si el User no tiene fecha, se preserva la existente.
-          if (user.ingreso) {
-            updateFields.ingreso = user.ingreso;
-          }
-          await VacEmpleado.findByIdAndUpdate(existente._id, { $set: updateFields });
+    const balanceSummary = users.map(u => ({
+      ...formatEmpleado(u),
+      disponible: Math.max(0, (u.vacSaldoTotal ?? 30) - (u.vacTomados ?? 0) - (u.vacPendientes ?? 0)),
+    }));
+
+    return sendSuccess(res, { porTipo, porArea, porMes, balanceSummary });
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+// ─── Políticas ────────────────────────────────────────────────────────────────
+
+const DEFAULT_POLITICA = {
+  diasBase:         30,
+  periodo:          'aniversario',
+  anticipacion:     15,
+  maxBloque:        15,
+  adelantar:        true,
+  doblePaso:        true,
+  autoAprobar:      false,
+  notifEmail:       true,
+  notifSlack:       true,
+  tiposHabilitados: [
+    { id: 'vacaciones',      enabled: true },
+    { id: 'permiso-goce',    enabled: true },
+    { id: 'permiso-singoce', enabled: true },
+    { id: 'medica',          enabled: true },
+    { id: 'cumple',          enabled: true },
+  ],
+};
+
+function formatPolitica(doc) {
+  return {
+    diasBase:         doc.diasBase,
+    periodo:          doc.periodo,
+    anticipacion:     doc.anticipacion,
+    maxBloque:        doc.maxBloque,
+    adelantar:        doc.adelantar,
+    doblePaso:        doc.doblePaso,
+    autoAprobar:      doc.autoAprobar,
+    notifEmail:       doc.notifEmail,
+    notifSlack:       doc.notifSlack,
+    tiposHabilitados: doc.tiposHabilitados,
+  };
+}
+
+const getPoliticas = async (_req, res) => {
+  try {
+    let doc = await VacPolitica.findOne().lean();
+    if (!doc) {
+      doc = (await VacPolitica.create(DEFAULT_POLITICA)).toObject();
+    }
+    return sendSuccess(res, formatPolitica(doc));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+const updatePoliticas = async (req, res) => {
+  try {
+    const allowed = [
+      'diasBase', 'periodo', 'anticipacion', 'maxBloque',
+      'adelantar', 'doblePaso', 'autoAprobar',
+      'notifEmail', 'notifSlack', 'tiposHabilitados',
+    ];
+    const update = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) update[key] = req.body[key];
+    }
+    const doc = await VacPolitica.findOneAndUpdate(
+      {},
+      { $set: update },
+      { new: true, upsert: true, runValidators: true }
+    ).lean();
+    return sendSuccess(res, formatPolitica(doc));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+// ─── Feriados ─────────────────────────────────────────────────────────────────
+
+const getFeriados = async (req, res) => {
+  try {
+    await getFeriadosSet();
+    const filter = {};
+    if (req.query.year) filter.year = parseInt(req.query.year);
+    const docs = await VacFeriado.find(filter).sort({ iso: 1 }).lean();
+    return sendSuccess(res, Object.fromEntries(docs.map(d => [d.iso, d.nombre])));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+const createFeriado = async (req, res) => {
+  try {
+    const { iso, nombre } = req.body;
+    if (!iso || !nombre) return sendError(res, 'iso y nombre son requeridos', 400);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+      return sendError(res, 'iso debe tener formato YYYY-MM-DD', 400);
+    }
+    const year = parseInt(iso.substring(0, 4));
+    const doc  = await VacFeriado.create({ iso, nombre: nombre.trim(), year });
+    invalidateFeriadosCache();
+    return sendSuccess(res, { iso: doc.iso, nombre: doc.nombre }, 201);
+  } catch (err) {
+    if (err.code === 11000) return sendError(res, 'Ya existe un feriado con esa fecha', 409);
+    return sendError(res, err.message);
+  }
+};
+
+const deleteFeriado = async (req, res) => {
+  try {
+    const { iso } = req.params;
+    const doc = await VacFeriado.findOneAndDelete({ iso });
+    if (!doc) return sendError(res, 'Feriado no encontrado', 404);
+    invalidateFeriadosCache();
+    return sendSuccess(res, { deleted: iso });
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+// ─── Seed (solo desarrollo) ───────────────────────────────────────────────────
+// Inicializa solicitudes de prueba usando usuarios reales del sistema.
+// No crea empleados ficticios — los datos de empleados vienen de User.
+
+const seedData = async (req, res) => {
+  try {
+    const force = req.query.force === 'true';
+    const count = await VacSolicitud.countDocuments();
+
+    if (count > 0 && !force) {
+      return sendError(
+        res,
+        `Ya existen ${count} solicitudes. Usa ?force=true para reinicializar.`,
+        409
+      );
+    }
+
+    if (force) {
+      await VacSolicitud.deleteMany({});
+      // Resetear contadores en todos los usuarios
+      await User.updateMany({}, { $set: { vacTomados: 0, vacPendientes: 0 } });
+    }
+
+    const users = await User.find({ active: true }).limit(5).lean();
+    if (users.length === 0) {
+      return sendError(res, 'No hay usuarios activos en el sistema para generar datos de prueba.', 400);
+    }
+
+    // Asegurarse de que los usuarios tienen saldo inicial
+    await User.updateMany({ vacSaldoTotal: { $lt: 1 } }, { $set: { vacSaldoTotal: 30 } });
+
+    const hoy = toIsoDate(new Date());
+
+    // Crear solicitudes de ejemplo con los primeros usuarios
+    const sols = [
+      { u: 0, tipo: 'vacaciones',   desde: '2026-06-02', hasta: '2026-06-06', dias: 5, estado: 'pendiente', motivo: 'Vacaciones programadas.' },
+      { u: 1, tipo: 'permiso-goce', desde: hoy,          hasta: hoy,          dias: 1, estado: 'pendiente', motivo: 'Trámite personal.' },
+      { u: 0, tipo: 'vacaciones',   desde: '2026-05-05', hasta: '2026-05-09', dias: 5, estado: 'aprobado',  motivo: 'Descanso anual.', aprobada: '2026-04-20' },
+      { u: 2, tipo: 'medica',       desde: '2026-05-12', hasta: '2026-05-14', dias: 3, estado: 'aprobado',  motivo: 'Licencia médica.', aprobada: '2026-05-12' },
+    ];
+
+    for (const s of sols) {
+      const emp       = users[s.u] || users[0];
+      const aprobador = users[(s.u + 1) % users.length];
+      await VacSolicitud.create({
+        empId:       emp._id,
+        tipo:        s.tipo,
+        desde:       s.desde,
+        hasta:       s.hasta,
+        dias:        s.dias,
+        estado:      s.estado,
+        motivo:      s.motivo,
+        solicitada:  new Date(),
+        aprobadorId: aprobador._id,
+        nivel:       'lider',
+        aprobada:    s.aprobada ? new Date(s.aprobada) : null,
+      });
+      if (TIPOS_CONFIG[s.tipo].descuenta) {
+        if (s.estado === 'pendiente') {
+          await User.findByIdAndUpdate(emp._id, { $inc: { vacPendientes: s.dias } });
+        } else if (s.estado === 'aprobado') {
+          await User.findByIdAndUpdate(emp._id, { $inc: { vacTomados: s.dias } });
         }
-        resultado.actualizados++;
-      } else {
-        resultado.omitidos++;
       }
     }
 
-    return resultado;
+    return sendSuccess(res, {
+      message: 'Datos de prueba creados correctamente',
+      solicitudes: sols.length,
+      usuarios: users.length,
+    }, 201);
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+// ─── Migración VacEmpleado → User ────────────────────────────────────────────
+// Transfiere saldos y referencias de las VacSolicitudes antiguas al modelo User.
+// Requiere que VacEmpleado.js siga existiendo en disco durante la migración.
+// Ejecutar UNA SOLA VEZ después del despliegue. Luego puede borrarse VacEmpleado.js.
+
+const migrateFromVacEmpleado = async (req, res) => {
+  let VacEmpleado;
+  try {
+    VacEmpleado = require('../models/VacEmpleado');
+  } catch {
+    return sendError(res, 'El modelo VacEmpleado ya fue eliminado; migración no necesaria.', 404);
   }
 
-  const syncFromUsers = async (req, res) => {
-    try {
-      const dryRun = req.query.dryRun === 'true';
-      const modo = req.query.modo ?? 'upsert';
-      const result = await _doSyncFromUsers({ dryRun, modo });
-      return sendSuccess(res, { ...result, dryRun });
-    } catch (err) {
-      return sendError(res, err.message);
-    }
-  };
+  try {
+    const empleados = await VacEmpleado.find({ userId: { $ne: null } }).lean();
+    const log = { usuarios: 0, solicitudes: 0, sinUserId: 0 };
 
-  module.exports = {
-    // Áreas
-    getAreas,
-    // Empleados
-    getEmpleados,
-    getEmpleadoById,
-    createEmpleado,
-    updateEmpleado,
-    getEmpleadoHistorial,
-    // Solicitudes
-    getSolicitudes,
-    getSolicitudById,
-    createSolicitud,
-    aprobarSolicitud,
-    rechazarSolicitud,
-    deleteSolicitud,
-    // Analítica
-    getDashboard,
-    getCalendario,
-    getReportes,
-    // Feriados
-    getFeriados,
-    createFeriado,
-    deleteFeriado,
-    // Políticas
-    getPoliticas,
-    updatePoliticas,
-    // Dev
-    seedData,
-    syncFromUsers,
-  };
+    // Mapa empId(VacEmpleado) → userId(User)
+    const empToUser = {};
+    for (const emp of empleados) {
+      empToUser[emp._id.toString()] = emp.userId.toString();
+    }
+
+    // 1. Transferir saldos y lead a User
+    for (const emp of empleados) {
+      const leadUserId = emp.leadId ? empToUser[emp.leadId.toString()] : null;
+      await User.findByIdAndUpdate(emp.userId, {
+        $set: {
+          vacSaldoTotal: emp.saldoTotal ?? 30,
+          vacTomados:    emp.tomados    ?? 0,
+          vacPendientes: emp.pendientes ?? 0,
+          ...(leadUserId ? { vacLeadId: leadUserId } : {}),
+        },
+      });
+      log.usuarios++;
+    }
+
+    // 2. Reasignar empId / aprobadorId / responsableId en VacSolicitudes
+    const solicitudes = await VacSolicitud.find({}).lean();
+    for (const s of solicitudes) {
+      const update = {};
+      if (s.empId        && empToUser[s.empId.toString()])        update.empId        = empToUser[s.empId.toString()];
+      if (s.aprobadorId  && empToUser[s.aprobadorId.toString()])  update.aprobadorId  = empToUser[s.aprobadorId.toString()];
+      if (s.responsableId && empToUser[s.responsableId.toString()]) update.responsableId = empToUser[s.responsableId.toString()];
+      if (Object.keys(update).length) {
+        await VacSolicitud.findByIdAndUpdate(s._id, { $set: update });
+        log.solicitudes++;
+      }
+    }
+
+    // 3. Reportar empleados del seed sin userId (no pueden migrarse)
+    log.sinUserId = await VacEmpleado.countDocuments({ userId: null });
+
+    return sendSuccess(res, {
+      message: 'Migración completada. Puedes eliminar VacEmpleado.js y la colección vacempleados de la BD.',
+      ...log,
+    });
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+module.exports = {
+  // Áreas
+  getAreas,
+  // Empleados
+  getEmpleados,
+  getEmpleadoById,
+  updateEmpleado,
+  getEmpleadoHistorial,
+  // Solicitudes
+  getSolicitudes,
+  getSolicitudById,
+  createSolicitud,
+  aprobarSolicitud,
+  rechazarSolicitud,
+  deleteSolicitud,
+  // Analítica
+  getDashboard,
+  getCalendario,
+  getReportes,
+  // Feriados
+  getFeriados,
+  createFeriado,
+  deleteFeriado,
+  // Políticas
+  getPoliticas,
+  updatePoliticas,
+  // Seed
+  seedData,
+  // Migración (ejecutar una vez tras el despliegue)
+  migrateFromVacEmpleado,
+};

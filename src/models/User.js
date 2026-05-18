@@ -27,7 +27,11 @@ const UserSchema = Schema({
             default: Date.now
         }
     }],
-    ingreso: { type: Date, default: null },
+    ingreso:        { type: Date, default: null },
+    vacSaldoTotal:  { type: Number, default: 30 },
+    vacTomados:     { type: Number, default: 0 },
+    vacPendientes:  { type: Number, default: 0 },
+    vacLeadId:      { type: Schema.Types.ObjectId, ref: 'User', default: null },
     webhook_bitrix: { type: String, default: null },
     microsoftId: { type: String, default: null, unique: true, sparse: true },
     authProvider: { type: String, enum: ['local', 'microsoft'], default: 'local' },

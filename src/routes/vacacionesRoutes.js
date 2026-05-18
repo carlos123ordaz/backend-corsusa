@@ -14,23 +14,22 @@ router.get('/reportes',   c.getReportes);
 router.get('/areas', c.getAreas);
 
 // Feriados (catálogo CRUD)
-router.get('/feriados',        c.getFeriados);
-router.post('/feriados',       c.createFeriado);
+router.get('/feriados',         c.getFeriados);
+router.post('/feriados',        c.createFeriado);
 router.delete('/feriados/:iso', c.deleteFeriado);
 
 // Políticas (singleton)
 router.get('/politicas', c.getPoliticas);
 router.put('/politicas', c.updatePoliticas);
 
-// Seed de datos iniciales (solo desarrollo)
+// Seed de datos de prueba (solo desarrollo)
 router.post('/seed', c.seedData);
 
-// Sincronizar empleados desde Users del sistema
-router.post('/sync-usuarios', c.syncFromUsers);
+// Migración única: transfiere saldos y referencias de VacEmpleado → User
+router.post('/migrate', c.migrateFromVacEmpleado);
 
-// Empleados
+// Empleados (leídos directo de User)
 router.get('/empleados',               c.getEmpleados);
-router.post('/empleados',              c.createEmpleado);
 router.get('/empleados/:id',           c.getEmpleadoById);
 router.put('/empleados/:id',           c.updateEmpleado);
 router.get('/empleados/:id/historial', c.getEmpleadoHistorial);

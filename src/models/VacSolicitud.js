@@ -1,7 +1,7 @@
 const { Schema, model } = require('mongoose');
 
 const VacSolicitudSchema = new Schema({
-  empId:         { type: Schema.Types.ObjectId, ref: 'VacEmpleado', required: true },
+  empId:         { type: Schema.Types.ObjectId, ref: 'User', required: true },
   tipo:          { type: String, required: true, enum: ['vacaciones', 'permiso-goce', 'permiso-singoce', 'medica', 'cumple'] },
   desde:         { type: String, required: true },  // YYYY-MM-DD
   hasta:         { type: String, required: true },  // YYYY-MM-DD
@@ -10,8 +10,8 @@ const VacSolicitudSchema = new Schema({
   estado:        { type: String, enum: ['pendiente', 'aprobado', 'rechazado'], default: 'pendiente' },
   motivo:        { type: String, required: true },
   solicitada:    { type: Date, default: Date.now },
-  aprobadorId:   { type: Schema.Types.ObjectId, ref: 'VacEmpleado', default: null },
-  responsableId: { type: Schema.Types.ObjectId, ref: 'VacEmpleado', default: null },
+  aprobadorId:   { type: Schema.Types.ObjectId, ref: 'User', default: null },
+  responsableId: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   nivel:         { type: String, enum: ['lider', 'rrhh'], default: 'lider' },
   aprobada:      { type: Date, default: null },
   motivoRechazo: { type: String, default: null },
