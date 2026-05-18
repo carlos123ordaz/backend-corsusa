@@ -10,6 +10,7 @@ const VacSolicitudSchema = new Schema({
   motivo:        { type: String, required: true },
   solicitada:    { type: Date, default: Date.now },
   aprobadorId:   { type: Schema.Types.ObjectId, ref: 'VacEmpleado', default: null },
+  responsableId: { type: Schema.Types.ObjectId, ref: 'VacEmpleado', default: null },
   nivel:         { type: String, enum: ['lider', 'rrhh'], default: 'lider' },
   aprobada:      { type: Date, default: null },
   motivoRechazo: { type: String, default: null },

@@ -119,17 +119,18 @@ function formatSolicitud(doc) {
   if (!doc) return null;
   const obj    = typeof doc.toObject === 'function' ? doc.toObject() : doc;
   const result = {
-    id:         obj._id.toString(),
-    empId:      obj.empId ? obj.empId.toString() : null,
-    tipo:       obj.tipo,
-    desde:      obj.desde,
-    hasta:      obj.hasta,
-    dias:       obj.dias,
-    estado:     obj.estado,
-    motivo:     obj.motivo,
-    solicitada: obj.solicitada instanceof Date ? toIsoDate(obj.solicitada) : obj.solicitada,
-    aprobador:  obj.aprobadorId ? obj.aprobadorId.toString() : null,
-    nivel:      obj.nivel,
+    id:           obj._id.toString(),
+    empId:        obj.empId ? obj.empId.toString() : null,
+    tipo:         obj.tipo,
+    desde:        obj.desde,
+    hasta:        obj.hasta,
+    dias:         obj.dias,
+    estado:       obj.estado,
+    motivo:       obj.motivo,
+    solicitada:   obj.solicitada instanceof Date ? toIsoDate(obj.solicitada) : obj.solicitada,
+    aprobador:    obj.aprobadorId    ? obj.aprobadorId.toString()    : null,
+    responsableId: obj.responsableId ? obj.responsableId.toString() : null,
+    nivel:        obj.nivel,
   };
   if (obj.aprobada) {
     result.aprobada = obj.aprobada instanceof Date ? toIsoDate(obj.aprobada) : obj.aprobada;
@@ -305,7 +306,7 @@ const getSolicitudById = async (req, res) => {
 
 const createSolicitud = async (req, res) => {
   try {
-    const { empId, tipo, desde, hasta, motivo } = req.body;
+    const { empId, tipo, desde, hasta, motivo, responsableId } = req.body;
 
     if (!empId || !tipo || !desde || !hasta || !motivo) {
       return sendError(res, 'empId, tipo, desde, hasta y motivo son requeridos', 400);
@@ -335,12 +336,28 @@ const createSolicitud = async (req, res) => {
       return sendError(res, 'El rango de fechas no contiene días hábiles', 400);
     }
 
+    // Validar responsable si se especificó
+    if (responsableId) {
+      const responsable = await VacEmpleado.findById(responsableId);
+      if (!responsable || !responsable.active) {
+        return sendError(res, 'Responsable no encontrado o inactivo', 404);
+      }
+    }
+
+    // El saldo solo se gana luego de cumplir 1 año. Si el empleado
+    // no ha completado su primer aniversario su balance efectivo es 0,
+    // pero igual se permite la solicitud (queda en negativo).
     if (TIPOS_CONFIG[tipo].descuenta) {
-      const disponible = emp.saldoTotal - emp.tomados - emp.pendientes;
-      if (disponible < dias) {
+      const ingreso = new Date(emp.ingreso);
+      const hoy = new Date();
+      const aniosServicio = (hoy - ingreso) / (1000 * 60 * 60 * 24 * 365.25);
+      const saldoGanado = aniosServicio >= 1 ? emp.saldoTotal : 0;
+      const disponible = saldoGanado - emp.tomados - emp.pendientes;
+      // No se bloquea: se permite balance negativo (adelanto antes del aniversario)
+      if (disponible - dias < -emp.saldoTotal) {
         return sendError(
           res,
-          `Saldo insuficiente. Disponible: ${disponible}d · Solicitado: ${dias}d`,
+          `Excede el adelanto máximo permitido. Disponible: ${disponible}d · Solicitado: ${dias}d`,
           400
         );
       }
@@ -360,7 +377,8 @@ const createSolicitud = async (req, res) => {
       );
     }
 
-    let aprobadorId = emp.leadId || null;
+    // Si se especificó un responsable, él es el aprobador
+    let aprobadorId = responsableId ? responsableId : (emp.leadId || null);
     let nivel = dias > 5 ? 'rrhh' : 'lider';
 
     if (!aprobadorId) {
@@ -369,9 +387,12 @@ const createSolicitud = async (req, res) => {
       nivel = 'rrhh';
     }
 
+    if (responsableId) nivel = 'lider';
+
     const solicitud = await VacSolicitud.create({
       empId, tipo, desde, hasta, dias, motivo,
-      aprobadorId, nivel, estado: 'pendiente', solicitada: new Date(),
+      aprobadorId, responsableId: responsableId || null,
+      nivel, estado: 'pendiente', solicitada: new Date(),
     });
 
     if (TIPOS_CONFIG[tipo].descuenta) {
@@ -395,9 +416,20 @@ const aprobarSolicitud = async (req, res) => {
       return sendError(res, `La solicitud ya fue ${solicitud.estado}`, 409);
     }
 
-    solicitud.estado  = 'aprobado';
+    // Si la solicitud tiene responsable designado, solo ese empleado puede aprobar
+    if (solicitud.responsableId) {
+      const pasadoId = req.body.aprobadorId ? req.body.aprobadorId.toString() : null;
+      if (pasadoId && pasadoId !== solicitud.responsableId.toString()) {
+        return sendError(res, 'Solo el responsable designado puede aprobar esta solicitud', 403);
+      }
+      // Si no se pasa aprobadorId, usar el responsable designado
+      solicitud.aprobadorId = solicitud.responsableId;
+    } else if (req.body.aprobadorId) {
+      solicitud.aprobadorId = req.body.aprobadorId;
+    }
+
+    solicitud.estado   = 'aprobado';
     solicitud.aprobada = new Date();
-    if (req.body.aprobadorId) solicitud.aprobadorId = req.body.aprobadorId;
     await solicitud.save();
 
     if (TIPOS_CONFIG[solicitud.tipo]?.descuenta) {
@@ -825,7 +857,7 @@ async function _doSyncFromUsers({ dryRun = false, modo = 'upsert' } = {}) {
       role:       user.position || '',
       area:       areaCode,
       avatar:     AVATARS[i % AVATARS.length],
-      ingreso:    user.createdAt || new Date(),
+      ingreso:    user.ingreso || user.createdAt || new Date(),
       userId:     user._id,
       active:     true,
       saldoTotal: 30,

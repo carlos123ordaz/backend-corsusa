@@ -27,6 +27,7 @@ const UserSchema = Schema({
             default: Date.now
         }
     }],
+    ingreso:       { type: Date, default: null },
     webhook_bitrix: { type: String, default: null },
     microsoftId: { type: String, default: null, unique: true, sparse: true },
     authProvider: { type: String, enum: ['local', 'microsoft'], default: 'local' },
