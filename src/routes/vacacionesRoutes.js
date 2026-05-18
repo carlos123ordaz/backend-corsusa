@@ -1,5 +1,7 @@
 const { Router } = require('express');
-const c = require('../controllers/vacacionesController');
+const c               = require('../controllers/vacacionesController');
+const authMiddleware  = require('../middleware/auth');
+const checkPermission = require('../middleware/checkPermission');
 
 const router = Router();
 
@@ -39,5 +41,6 @@ router.post('/solicitudes',             c.createSolicitud);
 router.get('/solicitudes/:id',          c.getSolicitudById);
 router.put('/solicitudes/:id/aprobar',  c.aprobarSolicitud);
 router.put('/solicitudes/:id/rechazar', c.rechazarSolicitud);
+router.delete('/solicitudes/:id', authMiddleware, checkPermission('vacaciones.eliminar'), c.deleteSolicitud);
 
 module.exports = router;

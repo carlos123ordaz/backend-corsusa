@@ -112,6 +112,7 @@ function formatEmpleado(doc) {
     saldoTotal: obj.saldoTotal,
     tomados:    obj.tomados,
     pendientes: obj.pendientes,
+    userId:     obj.userId ? obj.userId.toString() : null,
   };
 }
 
@@ -439,6 +440,27 @@ const aprobarSolicitud = async (req, res) => {
     }
 
     return sendSuccess(res, formatSolicitud(solicitud));
+  } catch (err) {
+    return sendError(res, err.message);
+  }
+};
+
+const deleteSolicitud = async (req, res) => {
+  try {
+    const solicitud = await VacSolicitud.findById(req.params.id);
+    if (!solicitud) return sendError(res, 'Solicitud no encontrada', 404);
+
+    // Revertir saldo si corresponde
+    if (TIPOS_CONFIG[solicitud.tipo]?.descuenta) {
+      if (solicitud.estado === 'pendiente') {
+        await VacEmpleado.findByIdAndUpdate(solicitud.empId, { $inc: { pendientes: -solicitud.dias } });
+      } else if (solicitud.estado === 'aprobado') {
+        await VacEmpleado.findByIdAndUpdate(solicitud.empId, { $inc: { tomados: -solicitud.dias } });
+      }
+    }
+
+    await VacSolicitud.findByIdAndDelete(req.params.id);
+    return sendSuccess(res, { deleted: req.params.id });
   } catch (err) {
     return sendError(res, err.message);
   }
@@ -909,6 +931,7 @@ module.exports = {
   createSolicitud,
   aprobarSolicitud,
   rechazarSolicitud,
+  deleteSolicitud,
   // Analítica
   getDashboard,
   getCalendario,
