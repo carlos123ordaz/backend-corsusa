@@ -126,6 +126,7 @@ function formatSolicitud(doc) {
     desde: obj.desde,
     hasta: obj.hasta,
     dias: obj.dias,
+    medioDia: obj.medioDia || false,
     estado: obj.estado,
     motivo: obj.motivo,
     solicitada: obj.solicitada instanceof Date ? toIsoDate(obj.solicitada) : obj.solicitada,
@@ -307,7 +308,7 @@ const getSolicitudById = async (req, res) => {
 
 const createSolicitud = async (req, res) => {
   try {
-    const { empId, tipo, desde, hasta, motivo, responsableId } = req.body;
+    const { empId, tipo, desde, hasta, motivo, responsableId, medioDia } = req.body;
 
     if (!empId || !tipo || !desde || !hasta || !motivo) {
       return sendError(res, 'empId, tipo, desde, hasta y motivo son requeridos', 400);
@@ -317,6 +318,9 @@ const createSolicitud = async (req, res) => {
     }
     if (desde > hasta) {
       return sendError(res, 'La fecha de inicio no puede ser posterior a la fecha de fin', 400);
+    }
+    if (medioDia && desde !== hasta) {
+      return sendError(res, 'Para medio día, la fecha de inicio y fin deben ser el mismo día', 400);
     }
 
     const emp = await VacEmpleado.findById(empId);
@@ -332,9 +336,18 @@ const createSolicitud = async (req, res) => {
       );
     }
 
-    const dias = await countWorkdays(desde, hasta);
-    if (dias < 1) {
-      return sendError(res, 'El rango de fechas no contiene días hábiles', 400);
+    let dias;
+    if (medioDia) {
+      const workdays = await countWorkdays(desde, hasta);
+      if (workdays < 1) {
+        return sendError(res, 'El día seleccionado no es un día hábil', 400);
+      }
+      dias = 0.5;
+    } else {
+      dias = await countWorkdays(desde, hasta);
+      if (dias < 1) {
+        return sendError(res, 'El rango de fechas no contiene días hábiles', 400);
+      }
     }
 
     // Validar responsable si se especificó
@@ -399,7 +412,7 @@ const createSolicitud = async (req, res) => {
     if (responsableId) nivel = 'lider';
 
     const solicitud = await VacSolicitud.create({
-      empId, tipo, desde, hasta, dias, motivo,
+      empId, tipo, desde, hasta, dias, medioDia: medioDia || false, motivo,
       aprobadorId, responsableId: responsableId || null,
       nivel, estado: 'pendiente', solicitada: new Date(),
     });

@@ -5,7 +5,8 @@ const VacSolicitudSchema = new Schema({
   tipo:          { type: String, required: true, enum: ['vacaciones', 'permiso-goce', 'permiso-singoce', 'medica', 'cumple'] },
   desde:         { type: String, required: true },  // YYYY-MM-DD
   hasta:         { type: String, required: true },  // YYYY-MM-DD
-  dias:          { type: Number, required: true, min: 1 },
+  dias:          { type: Number, required: true, min: 0.5 },
+  medioDia:      { type: Boolean, default: false },
   estado:        { type: String, enum: ['pendiente', 'aprobado', 'rechazado'], default: 'pendiente' },
   motivo:        { type: String, required: true },
   solicitada:    { type: Date, default: Date.now },
