@@ -155,6 +155,7 @@ function areaDocToCode(areaDoc) {
 const getAreas = async (_req, res) => {
   try {
     const docs = await Area.find({ status: 'active' }).sort({ name: 1 }).lean();
+    const seen = new Set();
     const areas = docs
       .map(a => {
         const code = areaDocToCode(a);
@@ -166,7 +167,12 @@ const getAreas = async (_req, res) => {
           color: (a.color && a.color !== '#6b7280') ? a.color : (DEFAULT_AREA_COLORS[code] || '#6b7280'),
         };
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter(a => {
+        if (seen.has(a.id)) return false;
+        seen.add(a.id);
+        return true;
+      });
     return sendSuccess(res, areas);
   } catch (err) {
     return sendError(res, err.message);
@@ -195,7 +201,13 @@ const getEmpleados = async (req, res) => {
     }
 
     const docs = await VacEmpleado.find(filter).sort({ area: 1, name: 1 }).lean();
-    return sendSuccess(res, docs.map(formatEmpleado));
+
+    // Si existen empleados vinculados a usuarios reales, excluir los del seed (sin userId).
+    // Esto evita que datos hardcodeados del seed aparezcan mezclados con empleados reales.
+    const hasLinked = docs.some(e => e.userId);
+    const result = hasLinked ? docs.filter(e => e.userId) : docs;
+
+    return sendSuccess(res, result.map(formatEmpleado));
   } catch (err) {
     return sendError(res, err.message);
   }
@@ -914,8 +926,9 @@ const createSolicitud = async (req, res) => {
       } else if (modo === 'upsert') {
         if (!dryRun) {
           const updateFields = { name: vacData.name, role: vacData.role, area: vacData.area };
-          // Propagar ingreso del usuario si el empleado aún no tiene fecha de ingreso registrada
-          if (!existente.ingreso && user.ingreso) {
+          // Siempre sincronizar ingreso desde User cuando el User lo tiene registrado.
+          // User.ingreso es la fuente de verdad; si el User no tiene fecha, se preserva la existente.
+          if (user.ingreso) {
             updateFields.ingreso = user.ingreso;
           }
           await VacEmpleado.findByIdAndUpdate(existente._id, { $set: updateFields });
