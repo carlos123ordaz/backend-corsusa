@@ -349,82 +349,67 @@ const createSolicitud = async (req, res) => {
     // no ha completado su primer aniversario su balance efectivo es 0,
     // pero igual se permite la solicitud (queda en negativo).
     if (TIPOS_CONFIG[tipo].descuenta) {
-      const ingreso = new Date(emp.ingreso);
       const hoy = new Date();
-      const aniosServicio = (hoy - ingreso) / (1000 * 60 * 60 * 24 * 365.25);
+      const aniosServicio = (hoy - new Date(emp.ingreso)) / (1000 * 60 * 60 * 24 * 365.25);
       const saldoGanado = aniosServicio >= 1 ? emp.saldoTotal : 0;
-      const disponible = saldoGanado - emp.tomados - emp.pendientes;
-      // No se bloquea: se permite balance negativo (adelanto antes del aniversario)
-      if (disponible - dias < -emp.saldoTotal) {
+      const disponible  = saldoGanado - emp.tomados - emp.pendientes;
+
+      if (aniosServicio < 1) {
+        if (emp.tomados + emp.pendientes + dias > emp.saldoTotal) {
+          const maxAdelanto = Math.max(0, emp.saldoTotal - emp.tomados - emp.pendientes);
+          return sendError(
+            res,
+            `Adelanto máximo alcanzado. Límite: ${emp.saldoTotal}d — Adelanto disponible: ${maxAdelanto}d`,
+            400
+          );
+        }
+      } else if (disponible < dias) {
         return sendError(
           res,
-          `Excede el adelanto máximo permitido. Disponible: ${disponible}d · Solicitado: ${dias}d`,
+          `Saldo insuficiente. Disponible: ${disponible}d · Solicitado: ${dias}d`,
           400
         );
-        const hoy = new Date();
-        const aniosServicio = (hoy - new Date(emp.ingreso)) / (1000 * 60 * 60 * 24 * 365.25);
-
-        if (aniosServicio < 1) {
-          // Sin año cumplido: se permite como adelanto pero sin superar el saldo futuro máximo
-          const totalComprometido = emp.tomados + emp.pendientes + dias;
-          if (totalComprometido > emp.saldoTotal) {
-            const maxAdelanto = Math.max(0, emp.saldoTotal - emp.tomados - emp.pendientes);
-            return sendError(
-              res,
-              `Adelanto máximo alcanzado. Límite: ${emp.saldoTotal}d — Adelanto disponible: ${maxAdelanto}d`,
-              400
-            );
-          }
-        } else {
-          const disponible = emp.saldoTotal - emp.tomados - emp.pendientes;
-          if (disponible < dias) {
-            return sendError(
-              res,
-              `Saldo insuficiente. Disponible: ${disponible}d · Solicitado: ${dias}d`,
-              400
-            );
-          }
-        }
       }
+    }
 
-      const overlap = await VacSolicitud.findOne({
-        empId,
-        estado: { $in: ['pendiente', 'aprobado'] },
-        desde: { $lte: hasta },
-        hasta: { $gte: desde },
-      });
-      if (overlap) {
-        return sendError(
-          res,
-          `Ya existe una solicitud que se superpone con el período ${overlap.desde} – ${overlap.hasta}`,
-          409
-        );
-      }
+    const overlap = await VacSolicitud.findOne({
+      empId,
+      estado: { $in: ['pendiente', 'aprobado'] },
+      desde: { $lte: hasta },
+      hasta: { $gte: desde },
+    });
+    if (overlap) {
+      return sendError(
+        res,
+        `Ya existe una solicitud que se superpone con el período ${overlap.desde} – ${overlap.hasta}`,
+        409
+      );
+    }
 
-      // Si se especificó un responsable, él es el aprobador
-      let aprobadorId = responsableId ? responsableId : (emp.leadId || null);
-      let nivel = dias > 5 ? 'rrhh' : 'lider';
+    // Si se especificó un responsable, él es el aprobador
+    let aprobadorId = responsableId ? responsableId : (emp.leadId || null);
+    let nivel = dias > 5 ? 'rrhh' : 'lider';
 
-      if (!aprobadorId) {
-        const rrhhLead = await VacEmpleado.findOne({ area: 'rrhh', leadId: null, active: true });
-        aprobadorId = rrhhLead ? rrhhLead._id : null;
-        nivel = 'rrhh';
-      }
+    if (!aprobadorId) {
+      const rrhhLead = await VacEmpleado.findOne({ area: 'rrhh', leadId: null, active: true });
+      aprobadorId = rrhhLead ? rrhhLead._id : null;
+      nivel = 'rrhh';
+    }
 
-      if (responsableId) nivel = 'lider';
+    if (responsableId) nivel = 'lider';
 
-      const solicitud = await VacSolicitud.create({
-        empId, tipo, desde, hasta, dias, motivo,
-        aprobadorId, responsableId: responsableId || null,
-        nivel, estado: 'pendiente', solicitada: new Date(),
-      });
+    const solicitud = await VacSolicitud.create({
+      empId, tipo, desde, hasta, dias, motivo,
+      aprobadorId, responsableId: responsableId || null,
+      nivel, estado: 'pendiente', solicitada: new Date(),
+    });
 
-      if (TIPOS_CONFIG[tipo].descuenta) {
-        await VacEmpleado.findByIdAndUpdate(empId, { $inc: { pendientes: dias } });
-      }
+    if (TIPOS_CONFIG[tipo].descuenta) {
+      await VacEmpleado.findByIdAndUpdate(empId, { $inc: { pendientes: dias } });
+    }
 
-      return sendSuccess(res, formatSolicitud(solicitud), 201);
-    } catch (err) {
+    return sendSuccess(res, formatSolicitud(solicitud), 201);
+  } catch (err) {
       if (err.name === 'ValidationError') {
         return sendError(res, Object.values(err.errors).map(e => e.message).join(', '), 400);
       }
@@ -902,7 +887,7 @@ const createSolicitud = async (req, res) => {
         role: user.position || '',
         area: areaCode,
         avatar: AVATARS[i % AVATARS.length],
-        ingreso: user.fechaIngreso || null,
+        ingreso: user.ingreso || null,
         userId: user._id,
         active: true,
         saldoTotal: 30,
@@ -916,9 +901,9 @@ const createSolicitud = async (req, res) => {
       } else if (modo === 'upsert') {
         if (!dryRun) {
           const updateFields = { name: vacData.name, role: vacData.role, area: vacData.area };
-          // Propagar fechaIngreso del usuario si el empleado aún no tiene fecha de ingreso registrada
-          if (!existente.ingreso && user.fechaIngreso) {
-            updateFields.ingreso = user.fechaIngreso;
+          // Propagar ingreso del usuario si el empleado aún no tiene fecha de ingreso registrada
+          if (!existente.ingreso && user.ingreso) {
+            updateFields.ingreso = user.ingreso;
           }
           await VacEmpleado.findByIdAndUpdate(existente._id, { $set: updateFields });
         }
