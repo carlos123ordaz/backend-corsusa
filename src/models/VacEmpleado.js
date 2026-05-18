@@ -6,7 +6,7 @@ const VacEmpleadoSchema = new Schema({
   area:       { type: String, required: true },
   leadId:     { type: Schema.Types.ObjectId, ref: 'VacEmpleado', default: null },
   avatar:     { type: String, default: 'var(--av-blue)' },
-  ingreso:    { type: Date, required: true },
+  ingreso:    { type: Date, default: null },
   saldoTotal: { type: Number, default: 30, min: 0 },
   tomados:    { type: Number, default: 0, min: 0 },
   pendientes: { type: Number, default: 0, min: 0 },
