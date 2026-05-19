@@ -49,6 +49,7 @@ const DEFAULT_AREA_COLORS = {
   td:    '#2563eb',
   ops:   '#0a9d6f',
   comer: '#ea8035',
+  
   fin:   '#8a4ad1',
   rrhh:  '#d65a96',
 };

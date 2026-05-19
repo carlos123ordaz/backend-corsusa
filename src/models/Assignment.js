@@ -32,6 +32,10 @@ const assignmentSchema = new mongoose.Schema(
             type: Number,
             required: true,
         },
+        caseNumber: {
+            type: String,
+            default: '',
+        },
     },
     {
         timestamps: true,
