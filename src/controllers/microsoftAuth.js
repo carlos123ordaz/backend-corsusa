@@ -34,11 +34,12 @@ const microsoftLogin = (req, res) => {
 
 // Paso 2: Callback — Microsoft redirige aquí con el code
 const microsoftCallback = async (req, res) => {
+    let returnUrl = '/';
+    let platform = 'web';
+    let mobileRedirectUri = '';
+
     try {
         const { code, state } = req.query;
-        let returnUrl = '/';
-        let platform = 'web';
-        let mobileRedirectUri = '';
 
         if (state) {
             try {
