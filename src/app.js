@@ -20,6 +20,7 @@ app.use('/api/incidencias', require('./routes/incidencia'));
 app.use('/api/work-types', require('./routes/workTypeRoutes'));
 app.use('/api/assignments', require('./routes/assignmentRoutes'));
 app.use('/api/case-labels', require('./routes/caseLabelRoutes'));
+app.use('/api/schedule-order', require('./routes/scheduleOrderRoutes'));
 app.use('/api/areas', require('./routes/areaRoutes'));
 
 app.use('/api/sales', require('./routes/salesRoutes'));
