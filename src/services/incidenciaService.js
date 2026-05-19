@@ -79,7 +79,7 @@ const parseExistingImages = (raw) => {
  */
 const prepararDeadlineUpdate = (updateData, incidenciaAnterior) => {
     if (updateData.newDeadline === undefined) return updateData;
-    if (incidenciaAnterior.estado !== 'En Revisión') return updateData;
+    if (incidenciaAnterior.estado === 'Cerrado') return updateData;
 
     return {
         ...updateData,

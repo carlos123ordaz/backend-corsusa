@@ -18,6 +18,7 @@ const {
     getDashboardStats,
     enviarRecordatorio,
     enviarRecordatoriosMasivo,
+    addHistorialNota,
 } = require('../controllers/Incidencia');
 const authMiddleware = require('../middleware/auth');
 
@@ -36,6 +37,9 @@ router.get('/asignadas/:userId/stats', getIncidenciasAsignadasStats);
 // ─── Recordatorios ───────────────────────────────────────────────────
 router.post('/recordatorios/enviar-masivo', authMiddleware, enviarRecordatoriosMasivo);
 router.post('/:id/recordatorio', authMiddleware, enviarRecordatorio);
+
+// ─── Historial ───────────────────────────────────────────────────────
+router.post('/:id/historial', authMiddleware, addHistorialNota);
 
 // ─── Detalle ─────────────────────────────────────────────────────────
 router.get('/:id', getIncidenciaById);

@@ -333,6 +333,38 @@ const enviarRecordatoriosMasivo = async (req, res) => {
     }
 };
 
+const addHistorialNota = async (req, res) => {
+    try {
+        const { nota } = req.body;
+        if (!nota?.trim()) {
+            return res.status(400).json({ error: 'La nota es requerida.' });
+        }
+        const incidencia = await Incidencia.findByIdAndUpdate(
+            req.params.id,
+            {
+                $push: {
+                    historialEstados: {
+                        notas: nota.trim(),
+                        fecha: new Date(),
+                        user: req.user?._id ?? null,
+                    },
+                },
+            },
+            { new: true }
+        ).populate([
+            { path: 'user', select: 'name lname email' },
+            { path: 'asigned', select: 'name lname email' },
+            { path: 'historialEstados.user', select: 'name lname email' },
+        ]);
+        if (!incidencia) {
+            return res.status(404).json({ error: 'Incidencia no encontrada.' });
+        }
+        res.json({ ok: true, historialEstados: incidencia.historialEstados });
+    } catch (error) {
+        handleServiceError(res, error);
+    }
+};
+
 module.exports = {
     registrarIncidencia,
     getIncidenciasByUser,
@@ -349,4 +381,5 @@ module.exports = {
     getDashboardStats,
     enviarRecordatorio,
     enviarRecordatoriosMasivo,
+    addHistorialNota,
 };
