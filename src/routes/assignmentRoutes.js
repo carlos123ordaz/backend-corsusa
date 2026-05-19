@@ -11,7 +11,8 @@ router.post('/', assignmentController.createAssignment);
 
 router.put('/:id', assignmentController.updateAssignment);
 
-// Bulk delete debe ir ANTES de /:id para no colisionar
+// Rutas estáticas antes de /:id para evitar colisiones
+router.delete('/partial', assignmentController.partialDeleteAssignments);
 router.delete('/bulk', assignmentController.bulkDeleteAssignments);
 router.delete('/user/:userId/:month/:year', assignmentController.deleteAssignmentsByUserAndMonth);
 router.delete('/:id', assignmentController.deleteAssignment);

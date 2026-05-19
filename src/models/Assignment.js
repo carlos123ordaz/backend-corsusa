@@ -45,5 +45,6 @@ const assignmentSchema = new mongoose.Schema(
 // Índices para búsquedas rápidas
 assignmentSchema.index({ areaId: 1, userId: 1, month: 1, year: 1 });
 assignmentSchema.index({ startDate: 1, endDate: 1 });
+assignmentSchema.index({ caseNumber: 1 });
 
 module.exports = mongoose.model('Assignment', assignmentSchema);

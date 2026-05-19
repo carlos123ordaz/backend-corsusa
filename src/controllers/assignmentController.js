@@ -148,6 +148,101 @@ exports.bulkDeleteAssignments = async (req, res) => {
     }
 };
 
+exports.partialDeleteAssignments = async (req, res) => {
+    try {
+        const { deletions } = req.body;
+        // deletions = [{ entryId: string, datesToRemove: string[] (ISO dates) }]
+        if (!Array.isArray(deletions) || deletions.length === 0) {
+            return res.status(400).json({ success: false, message: 'Se requiere un array de deletions' });
+        }
+
+        // Normaliza una fecha a clave "YYYY-M-D" en UTC para comparar días sin hora
+        const dateKey = (d) => {
+            const date = new Date(d);
+            return `${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`;
+        };
+
+        const created = [];
+
+        for (const { entryId, datesToRemove } of deletions) {
+            const assignment = await Assignment.findById(entryId);
+            if (!assignment) continue;
+
+            const removeSet = new Set((datesToRemove || []).map(dateKey));
+
+            // Itera cada día del rango y agrupa los que sobreviven en segmentos contiguos
+            const cur = new Date(assignment.startDate);
+            const end = new Date(assignment.endDate);
+            let segStart = null;
+            let segEnd = null;
+            const segments = [];
+
+            while (cur <= end) {
+                if (!removeSet.has(dateKey(cur))) {
+                    if (!segStart) segStart = new Date(cur);
+                    segEnd = new Date(cur);
+                } else {
+                    if (segStart) {
+                        segments.push({ start: new Date(segStart), end: new Date(segEnd) });
+                        segStart = null; segEnd = null;
+                    }
+                }
+                cur.setUTCDate(cur.getUTCDate() + 1);
+            }
+            if (segStart) segments.push({ start: segStart, end: segEnd });
+
+            await Assignment.findByIdAndDelete(entryId);
+
+            for (const seg of segments) {
+                const saved = await new Assignment({
+                    userId: assignment.userId,
+                    workTypeCode: assignment.workTypeCode,
+                    areaId: assignment.areaId,
+                    startDate: seg.start,
+                    endDate: seg.end,
+                    month: seg.start.getUTCMonth(),
+                    year: seg.start.getUTCFullYear(),
+                    caseNumber: assignment.caseNumber,
+                }).save();
+                created.push(saved);
+            }
+        }
+
+        res.json({ success: true, data: created });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.searchCaseNumbers = async (req, res) => {
+    try {
+        const { q } = req.query;
+        if (!q || !q.trim()) {
+            return res.json({ success: true, data: [] });
+        }
+        const regex = new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        const results = await Assignment.distinct('caseNumber', {
+            caseNumber: { $regex: regex, $ne: '', $exists: true },
+        });
+
+        // Prioriza coincidencias que empiezan con el query
+        const q_lower = q.toLowerCase();
+        const sorted = results
+            .filter(Boolean)
+            .sort((a, b) => {
+                const aStart = a.toLowerCase().startsWith(q_lower);
+                const bStart = b.toLowerCase().startsWith(q_lower);
+                if (aStart !== bStart) return aStart ? -1 : 1;
+                return a.localeCompare(b);
+            })
+            .slice(0, 10);
+
+        res.json({ success: true, data: sorted });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 exports.deleteAssignmentsByUserAndMonth = async (req, res) => {
     try {
         const { userId, month, year } = req.params;
